@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
 import { Program } from "@/db/schema";
 import {
   getWorkoutsForProgram,
@@ -12,6 +12,7 @@ import {
   updateSet,
   deleteSet,
   toggleSetComplete,
+  reorderSets,
 } from "@/lib/actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -43,10 +44,29 @@ import {
   Trophy,
   ChevronDown,
   ChevronUp,
+  GripVertical,
+  Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 // Types mirroring what comes from the DB
 interface SetRow {
@@ -79,6 +99,8 @@ interface WorkoutExerciseRow {
   targetRepsMin: number | null;
   targetRepsMax: number | null;
   targetWeight: number | null;
+  restTimerSets: number | null;
+  restTimerExercise: number | null;
   orderIndex: number;
   notes: string | null;
   exercise: ExerciseRow;
@@ -98,6 +120,212 @@ interface ActiveSession {
   } | null;
 }
 
+// ─── Session Timer Component ────────────────────────────────────────────────
+function SessionTimer({ startedAt }: { startedAt: Date }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const start = new Date(startedAt).getTime();
+    const interval = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    setElapsed(Math.floor((Date.now() - start) / 1000));
+    return () => clearInterval(interval);
+  }, [startedAt]);
+
+  const h = Math.floor(elapsed / 3600);
+  const m = Math.floor((elapsed % 3600) / 60);
+  const s = elapsed % 60;
+
+  return (
+    <div className="flex items-center gap-1.5 text-primary bg-primary/10 px-2 py-0.5 rounded text-xs font-mono font-bold">
+      <Clock className="w-3.5 h-3.5" />
+      {h > 0
+        ? `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`
+        : `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`}
+    </div>
+  );
+}
+
+// ─── Active Rest Timer Component ──────────────────────────────────────────────
+function ActiveRestTimer({
+  endTime,
+  exerciseName,
+  onClose,
+}: {
+  endTime: number;
+  exerciseName: string;
+  onClose: () => void;
+}) {
+  const [left, setLeft] = useState(Math.max(0, Math.ceil((endTime - Date.now()) / 1000)));
+
+  useEffect(() => {
+    setLeft(Math.max(0, Math.ceil((endTime - Date.now()) / 1000)));
+    const interval = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
+      setLeft(remaining);
+      if (remaining <= 0) {
+        clearInterval(interval);
+        toast.success("Rest time is over! Let's get back to work 💪");
+        onClose();
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [endTime, onClose]);
+
+  const m = Math.floor(left / 60);
+  const s = left % 60;
+
+  return (
+    <div className="fixed bottom-20 left-4 right-4 md:left-auto md:right-4 md:w-80 bg-card border-2 border-primary shadow-2xl shadow-primary/20 rounded-xl p-4 z-50 animate-in slide-in-from-bottom-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider mb-0.5">
+            Resting: {exerciseName}
+          </p>
+          <div className="text-3xl font-mono font-bold text-foreground">
+            {m}:{s.toString().padStart(2, "0")}
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="icon" onClick={() => onClose()}>
+            <X className="w-4 h-4" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InlineRestTimer({ endTime }: { endTime: number }) {
+  const [left, setLeft] = useState(Math.max(0, Math.ceil((endTime - Date.now()) / 1000)));
+
+  useEffect(() => {
+    setLeft(Math.max(0, Math.ceil((endTime - Date.now()) / 1000)));
+    const interval = setInterval(() => {
+      setLeft(Math.max(0, Math.ceil((endTime - Date.now()) / 1000)));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [endTime]);
+
+  if (left <= 0) return null;
+
+  const m = Math.floor(left / 60);
+  const s = left % 60;
+
+  return (
+    <Badge variant="outline" className="ml-2 bg-primary/10 text-primary border-primary/20 font-mono text-xs px-1.5">
+      <Clock className="w-3 h-3 mr-1 inline" />
+      {m}:{s.toString().padStart(2, "0")}
+    </Badge>
+  );
+}
+
+// ─── Sortable Set Row Component ─────────────────────────────────────────────
+function SortableSetRow({
+  set,
+  onToggle,
+  onDelete,
+  onEdit,
+}: {
+  set: SetRow;
+  onToggle: (id: number, isCompleted: boolean) => void;
+  onDelete: (id: number) => void;
+  onEdit: (id: number, weight: number, reps: number) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: set.id });
+
+  const [localWeight, setLocalWeight] = useState(String(set.weight));
+  const [localReps, setLocalReps] = useState(String(set.reps));
+
+  useEffect(() => {
+    setLocalWeight(String(set.weight));
+    setLocalReps(String(set.reps));
+  }, [set.weight, set.reps]);
+
+  const handleBlur = () => {
+    const w = parseFloat(localWeight);
+    const r = parseInt(localReps, 10);
+    if (!isNaN(w) && !isNaN(r) && w >= 0 && r > 0) {
+      if (w !== set.weight || r !== set.reps) {
+        onEdit(set.id, w, r);
+      }
+    } else {
+      setLocalWeight(String(set.weight));
+      setLocalReps(String(set.reps));
+    }
+  };
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 10 : 1,
+    position: "relative" as const,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "grid grid-cols-[24px_24px_1fr_1fr_32px_32px] gap-2 items-center px-1 py-1.5 rounded-lg transition-colors",
+        set.isCompleted
+          ? "bg-primary/8 text-foreground"
+          : "bg-secondary/30 text-muted-foreground",
+        isDragging && "shadow-md ring-1 ring-primary/20 opacity-90"
+      )}
+    >
+      <button
+        {...attributes}
+        {...listeners}
+        className="flex items-center justify-center text-muted-foreground/40 hover:text-foreground cursor-grab active:cursor-grabbing"
+      >
+        <GripVertical className="w-4 h-4" />
+      </button>
+      <span className="text-xs font-bold text-center text-muted-foreground">
+        {set.setNumber}
+      </span>
+      <input
+        type="number"
+        value={localWeight}
+        onChange={(e) => setLocalWeight(e.target.value)}
+        onBlur={handleBlur}
+        className="w-full bg-transparent text-sm font-semibold text-center outline-none focus:bg-secondary/50 focus:ring-1 focus:ring-primary rounded py-0.5 transition-all"
+        aria-label="Edit weight"
+      />
+      <input
+        type="number"
+        value={localReps}
+        onChange={(e) => setLocalReps(e.target.value)}
+        onBlur={handleBlur}
+        className="w-full bg-transparent text-sm font-semibold text-center outline-none focus:bg-secondary/50 focus:ring-1 focus:ring-primary rounded py-0.5 transition-all"
+        aria-label="Edit reps"
+      />
+      <button
+        id={`btn-toggle-set-${set.id}`}
+        onClick={() => onToggle(set.id, set.isCompleted)}
+        className="flex items-center justify-center"
+        aria-label={set.isCompleted ? "Mark incomplete" : "Mark complete"}
+      >
+        {set.isCompleted ? (
+          <CheckCircle2 className="w-5 h-5 text-primary" />
+        ) : (
+          <Circle className="w-5 h-5 text-muted-foreground/50" />
+        )}
+      </button>
+      <button
+        id={`btn-delete-set-${set.id}`}
+        onClick={() => onDelete(set.id)}
+        className="flex items-center justify-center text-muted-foreground/40 hover:text-destructive transition-colors"
+        aria-label="Delete set"
+      >
+        <Trash2 className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
 interface LoggerClientProps {
   activeSession: ActiveSession | null;
   programs: Program[];
@@ -115,6 +343,29 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
   const [selectedProgramId, setSelectedProgramId] = useState<string>("");
   const [workouts, setWorkouts] = useState<Awaited<ReturnType<typeof getWorkoutsForProgram>>>([]);
   const [selectedWorkoutId, setSelectedWorkoutId] = useState<string>("");
+  const [sessionDate, setSessionDate] = useState<string>(() => {
+    const today = new Date();
+    const offset = today.getTimezoneOffset() * 60000;
+    return new Date(today.getTime() - offset).toISOString().split("T")[0];
+  });
+
+  // Active Rest Timer state
+  const [activeRest, setActiveRest] = useState<{
+    endTime: number;
+    exerciseName: string;
+    exerciseId: number;
+  } | null>(null);
+
+  const startRestTimer = (exerciseId: number, completedCount: number) => {
+    const we = session?.workout?.workoutExercises.find((w) => w.exerciseId === exerciseId);
+    const isLastSet = we ? completedCount >= we.targetSets : false;
+    const restSeconds = isLastSet ? (we?.restTimerExercise ?? 120) : (we?.restTimerSets ?? 90);
+    setActiveRest({
+      endTime: Date.now() + restSeconds * 1000,
+      exerciseName: we?.exercise.name ?? "Exercise",
+      exerciseId: exerciseId,
+    });
+  };
 
   // Per-exercise weight/reps input state
   const [inputs, setInputs] = useState<
@@ -140,14 +391,21 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
     startTransition(async () => {
       const wkt = workouts.find((w) => w.id === Number(selectedWorkoutId));
       const sessionName = wkt?.name ?? "Workout";
-      const newSession = await startSession(Number(selectedWorkoutId), sessionName);
+      
+      let startedAt = new Date();
+      if (sessionDate) {
+        const [year, month, day] = sessionDate.split("-").map(Number);
+        startedAt.setFullYear(year, month - 1, day);
+      }
+      
+      const newSession = await startSession(Number(selectedWorkoutId), sessionName, startedAt);
       // Load full session data
       const fullWorkout = await getWorkoutWithExercises(Number(selectedWorkoutId));
       setSession({
         id: newSession.id,
         name: sessionName,
         status: "in_progress",
-        startedAt: new Date(),
+        startedAt,
         workoutId: Number(selectedWorkoutId),
         sets: [],
         workout: fullWorkout
@@ -193,6 +451,9 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
       );
       // Clear inputs for this exercise
       setInputs((prev) => ({ ...prev, [exerciseId]: { weight: "", reps: "" } }));
+      
+      const completedCount = existingSets.filter((s) => s.isCompleted).length + 1;
+      startRestTimer(exerciseId, completedCount);
       toast.success(`Set ${setNumber} logged ✓`, { duration: 1500 });
     });
   };
@@ -210,6 +471,15 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
             }
           : prev
       );
+      if (!current) {
+        // Find the exercise ID for this set
+        const set = session?.sets.find((s) => s.id === setId);
+        if (set) {
+          const existingSets = session?.sets.filter((s) => s.exerciseId === set.exerciseId) || [];
+          const completedCount = existingSets.filter((s) => s.isCompleted || s.id === setId).length;
+          startRestTimer(set.exerciseId, completedCount);
+        }
+      }
     });
   };
 
@@ -222,6 +492,69 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
           : prev
       );
     });
+  };
+
+  const handleEditSet = (setId: number, weight: number, reps: number) => {
+    startTransition(async () => {
+      await updateSet(setId, { weight, reps });
+      setSession((prev) =>
+        prev
+          ? {
+              ...prev,
+              sets: prev.sets.map((s) =>
+                s.id === setId ? { ...s, weight, reps } : s
+              ),
+            }
+          : prev
+      );
+    });
+  };
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 5,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = (event: DragEndEvent, exerciseId: number) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id || !session) return;
+
+    const exerciseSets = session.sets.filter((s) => s.exerciseId === exerciseId);
+    const oldIndex = exerciseSets.findIndex((s) => s.id === active.id);
+    const newIndex = exerciseSets.findIndex((s) => s.id === over.id);
+
+    if (oldIndex !== -1 && newIndex !== -1) {
+      const newSetsList = arrayMove(exerciseSets, oldIndex, newIndex);
+      
+      // Re-assign set numbers
+      const updatedSets = newSetsList.map((s, idx) => ({ ...s, setNumber: idx + 1 }));
+
+      // Update local state optimistically
+      setSession((prev) => {
+        if (!prev) return prev;
+        const otherSets = prev.sets.filter((s) => s.exerciseId !== exerciseId);
+        return {
+          ...prev,
+          sets: [...otherSets, ...updatedSets].sort((a, b) => {
+             if (a.exerciseId !== b.exerciseId) return a.exerciseId - b.exerciseId;
+             return a.setNumber - b.setNumber;
+          }),
+        };
+      });
+
+      // Persist order to DB
+      startTransition(async () => {
+        await reorderSets(
+          updatedSets.map((s) => ({ id: s.id, setNumber: s.setNumber }))
+        );
+      });
+    }
   };
 
   const handleCompleteSession = () => {
@@ -319,28 +652,41 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
               </div>
 
               {workouts.length > 0 && (
-                <div>
-                  <label className="text-sm font-medium text-muted-foreground">
-                    Workout Day
-                  </label>
-                  <Select
-                    value={selectedWorkoutId}
-                    onValueChange={(v) => v && setSelectedWorkoutId(v)}
-                  >
-                    <SelectTrigger
-                      id="select-workout"
-                      className="mt-1.5 bg-secondary/50 border-border/50"
+                <div className="space-y-4 mt-2">
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">
+                      Workout Day
+                    </label>
+                    <Select
+                      value={selectedWorkoutId}
+                      onValueChange={(v) => v && setSelectedWorkoutId(v)}
                     >
-                      <SelectValue placeholder="Select day..." />
-                    </SelectTrigger>
-                    <SelectContent className="bg-card border-border/50">
-                      {workouts.map((w) => (
-                        <SelectItem key={w.id} value={String(w.id)}>
-                          {w.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                      <SelectTrigger
+                        id="select-workout"
+                        className="mt-1.5 bg-secondary/50 border-border/50"
+                      >
+                        <SelectValue placeholder="Select day..." />
+                      </SelectTrigger>
+                      <SelectContent className="bg-card border-border/50">
+                        {workouts.map((w) => (
+                          <SelectItem key={w.id} value={String(w.id)}>
+                            {w.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">
+                      Date Logged
+                    </label>
+                    <Input
+                      type="date"
+                      value={sessionDate}
+                      onChange={(e) => setSessionDate(e.target.value)}
+                      className="mt-1.5 bg-secondary/50 border-border/50"
+                    />
+                  </div>
                 </div>
               )}
 
@@ -363,6 +709,17 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
 
   // ── ACTIVE SESSION ────────────────────────────────────────────────────────
 
+  let estMinutes = 0;
+  if (session.workout?.workoutExercises) {
+    const estTimeSeconds = session.workout.workoutExercises.reduce((total, we) => {
+      const repsTime = we.targetSets * ((we.targetRepsMax || 10) * 3);
+      const setsRestTime = Math.max(0, we.targetSets - 1) * (we.restTimerSets ?? 90);
+      const exerciseRestTime = we.restTimerExercise ?? 120;
+      return total + repsTime + setsRestTime + exerciseRestTime;
+    }, 0);
+    estMinutes = Math.round(estTimeSeconds / 60);
+  }
+
   return (
     <div className="space-y-5">
       {/* Session header */}
@@ -371,14 +728,22 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
         <CardContent className="pt-4 pb-3">
           <div className="flex items-start justify-between mb-3">
             <div>
-              <div className="flex items-center gap-2 mb-0.5">
-                <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                <span className="text-xs font-semibold text-primary uppercase tracking-wider">
-                  In Progress
-                </span>
+              <div className="flex items-center gap-3 mb-0.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                  <span className="text-xs font-semibold text-primary uppercase tracking-wider">
+                    In Progress
+                  </span>
+                </div>
+                <SessionTimer startedAt={session.startedAt} />
               </div>
-              <h2 className="text-xl font-bold text-foreground">
+              <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
                 {session.name}
+                {estMinutes > 0 && (
+                  <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground border-border/50 py-0 h-5">
+                    Est. ~{estMinutes}m
+                  </Badge>
+                )}
               </h2>
             </div>
             <button
@@ -454,12 +819,18 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
                       )}
                     </div>
                     <div>
-                      <CardTitle className="text-sm font-semibold">
+                      <CardTitle className="text-sm font-semibold flex items-center">
                         {we.exercise.name}
+                        {activeRest?.exerciseId === we.exerciseId && (
+                          <InlineRestTimer endTime={activeRest.endTime} />
+                        )}
                       </CardTitle>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-muted-foreground mt-0.5">
                         {we.targetSets} sets · {we.targetRepsMin}–
                         {we.targetRepsMax} reps
+                      </p>
+                      <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                        Rest: {we.restTimerSets ?? 90}s · {we.restTimerExercise ?? 120}s
                       </p>
                     </div>
                   </div>
@@ -486,58 +857,34 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
                 {exerciseSets.length > 0 && (
                   <div className="space-y-1.5">
                     {/* Table header */}
-                    <div className="grid grid-cols-[32px_1fr_1fr_32px_32px] gap-2 px-1">
-                      <span className="text-[10px] text-muted-foreground font-medium">#</span>
+                    <div className="grid grid-cols-[24px_24px_1fr_1fr_32px_32px] gap-2 px-1">
+                      <span />
+                      <span className="text-[10px] text-muted-foreground font-medium text-center">#</span>
                       <span className="text-[10px] text-muted-foreground font-medium text-center">KG</span>
                       <span className="text-[10px] text-muted-foreground font-medium text-center">REPS</span>
                       <span className="text-[10px] text-muted-foreground font-medium text-center">✓</span>
                       <span />
                     </div>
-                    {exerciseSets.map((set) => (
-                      <div
-                        key={set.id}
-                        className={cn(
-                          "grid grid-cols-[32px_1fr_1fr_32px_32px] gap-2 items-center px-1 py-1.5 rounded-lg transition-colors",
-                          set.isCompleted
-                            ? "bg-primary/8 text-foreground"
-                            : "bg-secondary/30 text-muted-foreground"
-                        )}
+                    <DndContext
+                      sensors={sensors}
+                      collisionDetection={closestCenter}
+                      onDragEnd={(e) => handleDragEnd(e, we.exerciseId)}
+                    >
+                      <SortableContext
+                        items={exerciseSets.map((s) => s.id)}
+                        strategy={verticalListSortingStrategy}
                       >
-                        <span className="text-xs font-bold text-center text-muted-foreground">
-                          {set.setNumber}
-                        </span>
-                        <span className="text-sm font-semibold text-center">
-                          {set.weight}
-                        </span>
-                        <span className="text-sm font-semibold text-center">
-                          {set.reps}
-                        </span>
-                        <button
-                          id={`btn-toggle-set-${set.id}`}
-                          onClick={() =>
-                            handleToggleSet(set.id, set.isCompleted)
-                          }
-                          className="flex items-center justify-center"
-                          aria-label={
-                            set.isCompleted ? "Mark incomplete" : "Mark complete"
-                          }
-                        >
-                          {set.isCompleted ? (
-                            <CheckCircle2 className="w-5 h-5 text-primary" />
-                          ) : (
-                            <Circle className="w-5 h-5 text-muted-foreground/50" />
-                          )}
-                        </button>
-                        <button
-                          id={`btn-delete-set-${set.id}`}
-                          onClick={() => handleDeleteSet(set.id)}
-                          className="flex items-center justify-center text-muted-foreground/40 hover:text-destructive transition-colors"
-                          aria-label="Delete set"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))}
+                        {exerciseSets.map((set) => (
+                          <SortableSetRow
+                            key={set.id}
+                            set={set}
+                            onToggle={handleToggleSet}
+                            onDelete={handleDeleteSet}
+                            onEdit={handleEditSet}
+                          />
+                        ))}
+                      </SortableContext>
+                    </DndContext>
                   </div>
                 )}
 

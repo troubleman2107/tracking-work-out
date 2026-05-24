@@ -94,6 +94,8 @@ export const workoutExercises = pgTable("workout_exercises", {
   targetRepsMin: integer("target_reps_min").default(8),
   targetRepsMax: integer("target_reps_max").default(12),
   targetWeight: real("target_weight"),
+  restTimerSets: integer("rest_timer_sets").default(90), // Rest seconds between sets
+  restTimerExercise: integer("rest_timer_exercise").default(120), // Rest seconds after this exercise
   orderIndex: integer("order_index").default(0).notNull(),
   notes: text("notes"),
 });

@@ -111,7 +111,7 @@ export async function removeExerciseFromWorkout(id: number) {
 
 export async function updateWorkoutExercise(
   id: number,
-  data: Partial<Pick<NewWorkoutExercise, "targetSets" | "targetRepsMin" | "targetRepsMax" | "targetWeight" | "notes">>
+  data: Partial<Pick<NewWorkoutExercise, "targetSets" | "targetRepsMin" | "targetRepsMax" | "targetWeight" | "notes" | "restTimerSets" | "restTimerExercise">>
 ) {
   await db.update(workoutExercises).set(data).where(eq(workoutExercises.id, id));
   revalidatePath("/planner");
@@ -174,10 +174,19 @@ export async function getSessionById(sessionId: number) {
   });
 }
 
-export async function startSession(workoutId: number, name: string): Promise<{ id: number }> {
+export async function startSession(
+  workoutId: number,
+  name: string,
+  startedAt?: Date
+): Promise<{ id: number }> {
   const [session] = await db
     .insert(sessions)
-    .values({ workoutId, name, status: "in_progress" })
+    .values({
+      workoutId,
+      name,
+      status: "in_progress",
+      ...(startedAt ? { startedAt } : {}),
+    })
     .returning({ id: sessions.id });
   revalidatePath("/log");
   return session;
@@ -198,6 +207,31 @@ export async function cancelSession(sessionId: number) {
     .set({ status: "skipped" })
     .where(eq(sessions.id, sessionId));
   revalidatePath("/log");
+  revalidatePath("/history");
+}
+
+export async function deleteSession(sessionId: number) {
+  await db.delete(sessions).where(eq(sessions.id, sessionId));
+  revalidatePath("/log");
+  revalidatePath("/history");
+  revalidatePath("/dashboard");
+}
+
+export async function resumeSession(sessionId: number) {
+  // Optional: Mark other active sessions as skipped to avoid conflicts
+  await db
+    .update(sessions)
+    .set({ status: "skipped" })
+    .where(eq(sessions.status, "in_progress"));
+
+  await db
+    .update(sessions)
+    .set({ status: "in_progress", completedAt: null })
+    .where(eq(sessions.id, sessionId));
+    
+  revalidatePath("/log");
+  revalidatePath("/history");
+  revalidatePath("/dashboard");
 }
 
 // ─── Sets ────────────────────────────────────────────────────────────────────
@@ -230,6 +264,17 @@ export async function toggleSetComplete(id: number, isCompleted: boolean) {
     .returning();
   revalidatePath("/log");
   return set;
+}
+
+export async function reorderSets(updates: { id: number; setNumber: number }[]) {
+  // Update all sets in parallel or sequentially. For SQLite/Postgres simple updates, sequential is fine
+  for (const update of updates) {
+    await db
+      .update(sets)
+      .set({ setNumber: update.setNumber })
+      .where(eq(sets.id, update.id));
+  }
+  revalidatePath("/log");
 }
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────

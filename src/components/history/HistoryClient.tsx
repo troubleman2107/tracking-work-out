@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { getSessionById } from "@/lib/actions";
+import { getSessionById, deleteSession, resumeSession } from "@/lib/actions";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -11,8 +11,13 @@ import {
   ChevronDown,
   ChevronUp,
   XCircle,
+  Trash2,
+  Edit3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 
 interface SessionItem {
   id: number;
@@ -63,6 +68,24 @@ export function HistoryClient({ sessions }: HistoryClientProps) {
         setDetails((prev) => ({ ...prev, [sessionId]: detail }));
       });
     }
+  };
+
+  const router = useRouter();
+
+  const handleDeleteSession = (sessionId: number, name: string) => {
+    if (!window.confirm(`Are you sure you want to delete "${name}"? This cannot be undone.`)) return;
+    startTransition(async () => {
+      await deleteSession(sessionId);
+      toast.success(`Deleted session "${name}"`);
+    });
+  };
+
+  const handleResumeSession = (sessionId: number) => {
+    startTransition(async () => {
+      await resumeSession(sessionId);
+      toast.success("Session resumed. Redirecting to logger...");
+      router.push("/log");
+    });
   };
 
   if (sessions.length === 0) {
@@ -245,6 +268,29 @@ export function HistoryClient({ sessions }: HistoryClientProps) {
                         No sets logged.
                       </p>
                     )}
+
+                    <div className="flex items-center gap-2 pt-2 border-t border-border/40 mt-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleResumeSession(session.id)}
+                        disabled={isPending}
+                        className="flex-1 text-xs gap-1.5 h-8 bg-secondary/50 border-border/50"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        Edit / Resume
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDeleteSession(session.id, session.name)}
+                        disabled={isPending}
+                        className="flex-1 text-xs gap-1.5 h-8 text-destructive hover:text-destructive hover:bg-destructive/10 border-border/50"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Delete
+                      </Button>
+                    </div>
                   </div>
                 ) : null}
               </div>

@@ -17,7 +17,7 @@ import {
   createExercise,
 } from "@/lib/actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +29,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   Dialog,
   DialogContent,
@@ -45,8 +54,11 @@ import {
   ListPlus,
   Edit3,
   Check,
+  ChevronsUpDown,
+  Clock,
 } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 interface PlannerClientProps {
   initialPrograms: Program[];
@@ -83,6 +95,9 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
   const [targetSets, setTargetSets] = useState("3");
   const [targetRepsMin, setTargetRepsMin] = useState("8");
   const [targetRepsMax, setTargetRepsMax] = useState("12");
+  const [restTimerSets, setRestTimerSets] = useState("90");
+  const [restTimerExercise, setRestTimerExercise] = useState("120");
+  const [openCombobox, setOpenCombobox] = useState(false);
 
   // Create New Exercise dialog state
   const [createExDialogOpen, setCreateExDialogOpen] = useState(false);
@@ -179,6 +194,8 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
         targetSets: Number(targetSets),
         targetRepsMin: Number(targetRepsMin),
         targetRepsMax: Number(targetRepsMax),
+        restTimerSets: Number(restTimerSets) || 90,
+        restTimerExercise: Number(restTimerExercise) || 120,
       });
       const updated = await getWorkoutWithExercises(selectedWorkout.id);
       setSelectedWorkout(updated ?? null);
@@ -445,12 +462,31 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
       {selectedWorkout && (
         <>
           <Separator className="bg-border/50" />
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold flex items-center gap-2">
-              <Dumbbell className="w-5 h-5 text-primary" />
-              {selectedWorkout.name}
-            </h2>
-            <Dialog open={addExDialogOpen} onOpenChange={setAddExDialogOpen}>
+          {(() => {
+            const estTimeSeconds = (selectedWorkout.workoutExercises as NonNullable<typeof selectedWorkout>["workoutExercises"]).reduce((total, we) => {
+              const repsTime = we.targetSets * ((we.targetRepsMax || 10) * 3);
+              const setsRestTime = Math.max(0, we.targetSets - 1) * (we.restTimerSets ?? 90);
+              const exerciseRestTime = we.restTimerExercise ?? 120;
+              return total + repsTime + setsRestTime + exerciseRestTime;
+            }, 0);
+            const estMinutes = Math.round(estTimeSeconds / 60);
+
+            return (
+              <>
+                <div className="flex items-center justify-between">
+                  <div>
+                  <h2 className="text-lg font-semibold flex items-center gap-2">
+                    <Dumbbell className="w-5 h-5 text-primary" />
+                    {selectedWorkout.name}
+                  </h2>
+                  {estMinutes > 0 && (
+                    <p className="text-xs text-muted-foreground ml-7 flex items-center gap-1 mt-0.5 font-medium">
+                      <Clock className="w-3 h-3" />
+                      Est. ~{estMinutes} min
+                    </p>
+                  )}
+                </div>
+                <Dialog open={addExDialogOpen} onOpenChange={setAddExDialogOpen}>
               <DialogTrigger
                 render={
                   <Button
@@ -548,34 +584,64 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
                         </DialogContent>
                       </Dialog>
                     </div>
-                    <Select
-                      value={selectedExerciseId}
-                      onValueChange={(v) => v && setSelectedExerciseId(v)}
-                    >
-                      <SelectTrigger
-                        id="select-exercise"
-                        className="bg-secondary/50 border-border/50"
+                    <Popover open={openCombobox} onOpenChange={setOpenCombobox}>
+                      <PopoverTrigger
+                        className={cn(
+                          buttonVariants({ variant: "outline" }),
+                          "w-full justify-between bg-secondary/50 border-border/50 font-normal h-10 px-3 py-2"
+                        )}
+                        role="combobox"
+                        aria-expanded={openCombobox}
                       >
-                        <SelectValue placeholder={
-                          exercises.length === 0
+                        {selectedExerciseId
+                          ? (
+                            <div className="flex items-center gap-2 truncate">
+                              <span>{exercises.find((ex) => String(ex.id) === selectedExerciseId)?.name}</span>
+                              <Badge variant="secondary" className="text-[10px] capitalize bg-primary/10 text-primary border-0">
+                                {exercises.find((ex) => String(ex.id) === selectedExerciseId)?.muscleGroup.replace("_", " ")}
+                              </Badge>
+                            </div>
+                          )
+                          : exercises.length === 0
                             ? "No exercises — create one first"
-                            : "Select exercise..."
-                        } />
-                      </SelectTrigger>
-                      <SelectContent className="bg-card border-border/50 max-h-64">
-                        {exercises.map((ex) => (
-                          <SelectItem key={ex.id} value={String(ex.id)}>
-                            <span>{ex.name}</span>
-                            <Badge
-                              variant="secondary"
-                              className="ml-2 text-[10px] capitalize bg-primary/10 text-primary border-0"
-                            >
-                              {ex.muscleGroup.replace("_", " ")}
-                            </Badge>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                            : "Select exercise..."}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[300px] sm:w-[350px] p-0 bg-card border-border/50">
+                        <Command>
+                          <CommandInput placeholder="Search exercise..." />
+                          <CommandList className="max-h-64">
+                            <CommandEmpty>No exercise found.</CommandEmpty>
+                            <CommandGroup>
+                              {exercises.map((ex) => (
+                                <CommandItem
+                                  key={ex.id}
+                                  value={ex.name}
+                                  onSelect={() => {
+                                    setSelectedExerciseId(String(ex.id));
+                                    setOpenCombobox(false);
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      selectedExerciseId === String(ex.id) ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                  <span>{ex.name}</span>
+                                  <Badge
+                                    variant="secondary"
+                                    className="ml-auto text-[10px] capitalize bg-primary/10 text-primary border-0"
+                                  >
+                                    {ex.muscleGroup.replace("_", " ")}
+                                  </Badge>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                     {exercises.length === 0 && (
                       <p className="text-xs text-muted-foreground mt-1.5">
                         Your exercise library is empty.{" "}
@@ -625,6 +691,30 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
                         min="1"
                         value={targetRepsMax}
                         onChange={(e) => setTargetRepsMax(e.target.value)}
+                        className="mt-1.5 bg-secondary/50 border-border/50 text-center"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="rest-sets" className="text-xs">Rest Between Sets (s)</Label>
+                      <Input
+                        id="rest-sets"
+                        type="number"
+                        min="0"
+                        value={restTimerSets}
+                        onChange={(e) => setRestTimerSets(e.target.value)}
+                        className="mt-1.5 bg-secondary/50 border-border/50 text-center"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="rest-ex" className="text-xs">Rest After Exercise (s)</Label>
+                      <Input
+                        id="rest-ex"
+                        type="number"
+                        min="0"
+                        value={restTimerExercise}
+                        onChange={(e) => setRestTimerExercise(e.target.value)}
                         className="mt-1.5 bg-secondary/50 border-border/50 text-center"
                       />
                     </div>
@@ -679,6 +769,9 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
                             ? ` · ${we.targetWeight}kg`
                             : ""}
                         </p>
+                        <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                          Rest: {we.restTimerSets ?? 90}s between sets · {we.restTimerExercise ?? 120}s after
+                        </p>
                       </div>
                       <button
                         id={`btn-remove-ex-${we.id}`}
@@ -696,6 +789,9 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
               ))}
             </div>
           )}
+          </>
+          );
+        })()}
         </>
       )}
     </div>
