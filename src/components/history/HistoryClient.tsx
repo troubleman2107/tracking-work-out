@@ -5,6 +5,13 @@ import { getSessionById, deleteSession, resumeSession } from "@/lib/actions";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
   CheckCircle2,
   Clock,
   Dumbbell,
@@ -54,6 +61,8 @@ function formatDuration(start: Date, end: Date | null) {
 export function HistoryClient({ sessions }: HistoryClientProps) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [details, setDetails] = useState<Record<number, SessionDetail>>({});
+  const [deleteSessionId, setDeleteSessionId] = useState<number | null>(null);
+  const [deleteSessionName, setDeleteSessionName] = useState<string>("");
   const [isPending, startTransition] = useTransition();
 
   const handleToggle = (sessionId: number) => {
@@ -73,10 +82,16 @@ export function HistoryClient({ sessions }: HistoryClientProps) {
   const router = useRouter();
 
   const handleDeleteSession = (sessionId: number, name: string) => {
-    if (!window.confirm(`Are you sure you want to delete "${name}"? This cannot be undone.`)) return;
+    setDeleteSessionId(sessionId);
+    setDeleteSessionName(name);
+  };
+
+  const confirmDeleteSession = () => {
+    if (!deleteSessionId) return;
     startTransition(async () => {
-      await deleteSession(sessionId);
-      toast.success(`Deleted session "${name}"`);
+      await deleteSession(deleteSessionId);
+      toast.success(`Deleted session "${deleteSessionName}"`);
+      setDeleteSessionId(null);
     });
   };
 
@@ -298,6 +313,35 @@ export function HistoryClient({ sessions }: HistoryClientProps) {
           </Card>
         );
       })}
+
+      <Dialog open={deleteSessionId !== null} onOpenChange={(open) => !open && setDeleteSessionId(null)}>
+        <DialogContent className="bg-card border-border/50 max-w-sm mx-auto">
+          <DialogHeader>
+            <DialogTitle>Delete Session</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete "{deleteSessionName}"? This action cannot be undone and will remove all logged sets.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-2 mt-2">
+            <Button
+              variant="destructive"
+              onClick={confirmDeleteSession}
+              disabled={isPending}
+              className="w-full"
+            >
+              {isPending ? "Deleting..." : "Delete Session"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteSessionId(null)}
+              disabled={isPending}
+              className="w-full bg-secondary/50 border-border/50"
+            >
+              Cancel
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

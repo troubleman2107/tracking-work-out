@@ -723,7 +723,7 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
   return (
     <div className="space-y-5">
       {/* Session header */}
-      <Card className="glass border-border/50 overflow-hidden">
+      <Card className="bg-card/40 backdrop-blur-2xl border border-border/50 overflow-hidden sticky top-4 z-40 shadow-xl shadow-background/50">
         <div className="h-1 bg-gradient-to-r from-primary to-chart-2" />
         <CardContent className="pt-4 pb-3">
           <div className="flex items-start justify-between mb-3">
@@ -736,14 +736,14 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
                   </span>
                 </div>
                 <SessionTimer startedAt={session.startedAt} />
-              </div>
-              <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-                {session.name}
                 {estMinutes > 0 && (
                   <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground border-border/50 py-0 h-5">
                     Est. ~{estMinutes}m
                   </Badge>
                 )}
+              </div>
+              <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
+                {session.name}
               </h2>
             </div>
             <button
