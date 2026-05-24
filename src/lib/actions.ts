@@ -34,6 +34,13 @@ export async function deleteProgram(id: number) {
   revalidatePath("/planner");
 }
 
+export async function setActiveProgram(id: number) {
+  await db.update(programs).set({ isActive: false });
+  await db.update(programs).set({ isActive: true }).where(eq(programs.id, id));
+  revalidatePath("/planner");
+  revalidatePath("/log");
+}
+
 // ─── Workouts ────────────────────────────────────────────────────────────────
 
 export async function getWorkoutsForProgram(programId: number) {

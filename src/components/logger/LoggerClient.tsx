@@ -351,8 +351,20 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
 
   // Start session flow
   const [startDialogOpen, setStartDialogOpen] = useState(false);
-  const [selectedProgramId, setSelectedProgramId] = useState<string>("");
+  const [selectedProgramId, setSelectedProgramId] = useState<string>(() => {
+    return String(programs.find((p) => p.isActive)?.id ?? programs[0]?.id ?? "");
+  });
   const [workouts, setWorkouts] = useState<Awaited<ReturnType<typeof getWorkoutsForProgram>>>([]);
+  
+  useEffect(() => {
+    if (selectedProgramId && workouts.length === 0) {
+      startTransition(async () => {
+        const wkts = await getWorkoutsForProgram(Number(selectedProgramId));
+        setWorkouts(wkts);
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [selectedWorkoutId, setSelectedWorkoutId] = useState<string>("");
   const [sessionDate, setSessionDate] = useState<string>(() => {
     const today = new Date();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
 import { Program } from "@/db/schema";
 import { MuscleGroup } from "@/db/schema";
 import {
@@ -15,6 +15,7 @@ import {
   removeExerciseFromWorkout,
   updateWorkoutExercise,
   createExercise,
+  setActiveProgram,
 } from "@/lib/actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -56,6 +57,7 @@ import {
   Check,
   ChevronsUpDown,
   Clock,
+  Star,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -69,9 +71,9 @@ type WorkoutsForProgram = Awaited<ReturnType<typeof getWorkoutsForProgram>>;
 
 export function PlannerClient({ initialPrograms }: PlannerClientProps) {
   const [programs, setPrograms] = useState(initialPrograms);
-  const [selectedProgramId, setSelectedProgramId] = useState<number | null>(
-    initialPrograms[0]?.id ?? null
-  );
+  const [selectedProgramId, setSelectedProgramId] = useState<number | null>(() => {
+    return initialPrograms.find((p) => p.isActive)?.id ?? initialPrograms[0]?.id ?? null;
+  });
   const [workouts, setWorkouts] = useState<WorkoutsForProgram>([]);
   const [selectedWorkout, setSelectedWorkout] =
     useState<WorkoutWithExercises | null>(null);
@@ -112,6 +114,13 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
       setSelectedWorkout(null);
     });
   };
+
+  useEffect(() => {
+    if (selectedProgramId && workouts.length === 0) {
+      loadWorkoutsForProgram(selectedProgramId);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSelectProgram = (program: Program) => {
     setSelectedProgramId(program.id);
@@ -158,6 +167,19 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
         setSelectedWorkout(null);
       }
       toast.success(`Program "${name}" deleted.`);
+    });
+  };
+
+  const handleSetActive = (program: Program) => {
+    startTransition(async () => {
+      await setActiveProgram(program.id);
+      setPrograms((prev) =>
+        prev.map((p) => ({
+          ...p,
+          isActive: p.id === program.id,
+        }))
+      );
+      toast.success(`"${program.name}" is now the active program!`);
     });
   };
 
@@ -335,6 +357,21 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!program.isActive) handleSetActive(program);
+                    }}
+                    className={cn(
+                      "p-1.5 rounded-lg transition-colors",
+                      program.isActive 
+                        ? "text-yellow-500 bg-yellow-500/10" 
+                        : "text-muted-foreground hover:text-yellow-500 hover:bg-yellow-500/10"
+                    )}
+                    aria-label={program.isActive ? "Active program" : "Set as active"}
+                  >
+                    <Star className={cn("w-4 h-4", program.isActive && "fill-current")} />
+                  </button>
                   {selectedProgramId === program.id && (
                     <Check className="w-4 h-4 text-primary" />
                   )}
