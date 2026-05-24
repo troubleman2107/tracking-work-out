@@ -15,7 +15,7 @@ import {
   reorderSets,
 } from "@/lib/actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -26,6 +26,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   Dialog,
   DialogContent,
@@ -46,6 +55,8 @@ import {
   ChevronUp,
   GripVertical,
   Clock,
+  Check,
+  ChevronsUpDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -348,6 +359,9 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
     const offset = today.getTimezoneOffset() * 60000;
     return new Date(today.getTime() - offset).toISOString().split("T")[0];
   });
+  
+  const [programOpen, setProgramOpen] = useState(false);
+  const [workoutOpen, setWorkoutOpen] = useState(false);
 
   // Active Rest Timer state
   const [activeRest, setActiveRest] = useState<{
@@ -631,24 +645,49 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
                 <label className="text-sm font-medium text-muted-foreground">
                   Program
                 </label>
-                <Select
-                  value={selectedProgramId}
-                  onValueChange={handleProgramChange}
-                >
-                  <SelectTrigger
-                    id="select-program"
-                    className="mt-1.5 bg-secondary/50 border-border/50"
+                <Popover open={programOpen} onOpenChange={setProgramOpen}>
+                  <PopoverTrigger
+                    className={cn(
+                      buttonVariants({ variant: "outline" }),
+                      "w-full justify-between mt-1.5 bg-secondary/50 border-border/50 text-foreground font-normal"
+                    )}
+                    role="combobox"
+                    aria-expanded={programOpen}
                   >
-                    <SelectValue placeholder="Select program..." />
-                  </SelectTrigger>
-                  <SelectContent className="bg-card border-border/50">
-                    {programs.map((p) => (
-                      <SelectItem key={p.id} value={String(p.id)}>
-                        {p.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                    {selectedProgramId
+                      ? programs.find((p) => String(p.id) === selectedProgramId)?.name
+                      : "Select program..."}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[300px] sm:w-[350px] p-0 bg-card border-border/50">
+                    <Command>
+                      <CommandInput placeholder="Search program..." />
+                      <CommandList>
+                        <CommandEmpty>No program found.</CommandEmpty>
+                        <CommandGroup>
+                          {programs.map((p) => (
+                            <CommandItem
+                              key={p.id}
+                              value={p.name}
+                              onSelect={() => {
+                                handleProgramChange(String(p.id));
+                                setProgramOpen(false);
+                              }}
+                            >
+                              <Check
+                                className={cn(
+                                  "mr-2 h-4 w-4 text-primary",
+                                  selectedProgramId === String(p.id) ? "opacity-100" : "opacity-0"
+                                )}
+                              />
+                              {p.name}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
 
               {workouts.length > 0 && (
@@ -657,24 +696,49 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
                     <label className="text-sm font-medium text-muted-foreground">
                       Workout Day
                     </label>
-                    <Select
-                      value={selectedWorkoutId}
-                      onValueChange={(v) => v && setSelectedWorkoutId(v)}
-                    >
-                      <SelectTrigger
-                        id="select-workout"
-                        className="mt-1.5 bg-secondary/50 border-border/50"
+                    <Popover open={workoutOpen} onOpenChange={setWorkoutOpen}>
+                      <PopoverTrigger
+                        className={cn(
+                          buttonVariants({ variant: "outline" }),
+                          "w-full justify-between mt-1.5 bg-secondary/50 border-border/50 text-foreground font-normal"
+                        )}
+                        role="combobox"
+                        aria-expanded={workoutOpen}
                       >
-                        <SelectValue placeholder="Select day..." />
-                      </SelectTrigger>
-                      <SelectContent className="bg-card border-border/50">
-                        {workouts.map((w) => (
-                          <SelectItem key={w.id} value={String(w.id)}>
-                            {w.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                        {selectedWorkoutId
+                          ? workouts.find((w) => String(w.id) === selectedWorkoutId)?.name
+                          : "Select day..."}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[300px] sm:w-[350px] p-0 bg-card border-border/50">
+                        <Command>
+                          <CommandInput placeholder="Search day..." />
+                          <CommandList>
+                            <CommandEmpty>No workout day found.</CommandEmpty>
+                            <CommandGroup>
+                              {workouts.map((w) => (
+                                <CommandItem
+                                  key={w.id}
+                                  value={w.name}
+                                  onSelect={() => {
+                                    setSelectedWorkoutId(String(w.id));
+                                    setWorkoutOpen(false);
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4 text-primary",
+                                      selectedWorkoutId === String(w.id) ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                  {w.name}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                   <div>
                     <label className="text-sm font-medium text-muted-foreground">
