@@ -1,0 +1,665 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import { Program } from "@/db/schema";
+import {
+  getWorkoutsForProgram,
+  getWorkoutWithExercises,
+  startSession,
+  completeSession,
+  cancelSession,
+  logSet,
+  updateSet,
+  deleteSet,
+  toggleSetComplete,
+} from "@/lib/actions";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  CheckCircle2,
+  Circle,
+  Plus,
+  Trash2,
+  Dumbbell,
+  Play,
+  Flag,
+  X,
+  Trophy,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
+import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+import { useRouter } from "next/navigation";
+
+// Types mirroring what comes from the DB
+interface SetRow {
+  id: number;
+  setNumber: number;
+  weight: number;
+  reps: number;
+  isCompleted: boolean;
+  exerciseId: number;
+  sessionId: number;
+  notes: string | null;
+  rpe: number | null;
+  loggedAt: Date;
+}
+
+interface ExerciseRow {
+  id: number;
+  name: string;
+  muscleGroup: string;
+  secondaryMuscleGroup: string | null;
+  instructions: string | null;
+  createdAt: Date;
+}
+
+interface WorkoutExerciseRow {
+  id: number;
+  workoutId: number;
+  exerciseId: number;
+  targetSets: number;
+  targetRepsMin: number | null;
+  targetRepsMax: number | null;
+  targetWeight: number | null;
+  orderIndex: number;
+  notes: string | null;
+  exercise: ExerciseRow;
+}
+
+interface ActiveSession {
+  id: number;
+  name: string;
+  status: string;
+  startedAt: Date;
+  workoutId: number | null;
+  sets: SetRow[];
+  workout: {
+    id: number;
+    name: string;
+    workoutExercises: WorkoutExerciseRow[];
+  } | null;
+}
+
+interface LoggerClientProps {
+  activeSession: ActiveSession | null;
+  programs: Program[];
+}
+
+export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+
+  // Session data
+  const [session, setSession] = useState<ActiveSession | null>(activeSession);
+
+  // Start session flow
+  const [startDialogOpen, setStartDialogOpen] = useState(false);
+  const [selectedProgramId, setSelectedProgramId] = useState<string>("");
+  const [workouts, setWorkouts] = useState<Awaited<ReturnType<typeof getWorkoutsForProgram>>>([]);
+  const [selectedWorkoutId, setSelectedWorkoutId] = useState<string>("");
+
+  // Per-exercise weight/reps input state
+  const [inputs, setInputs] = useState<
+    Record<number, { weight: string; reps: string }>
+  >({});
+
+  // Collapsed exercises
+  const [collapsedExercises, setCollapsedExercises] = useState<Set<number>>(new Set());
+
+  // Complete dialog
+  const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
+
+  const handleProgramChange = async (programId: string | null) => {
+    if (!programId) return;
+    setSelectedProgramId(programId);
+    setSelectedWorkoutId("");
+    const wkts = await getWorkoutsForProgram(Number(programId));
+    setWorkouts(wkts);
+  };
+
+  const handleStartSession = () => {
+    if (!selectedWorkoutId) return;
+    startTransition(async () => {
+      const wkt = workouts.find((w) => w.id === Number(selectedWorkoutId));
+      const sessionName = wkt?.name ?? "Workout";
+      const newSession = await startSession(Number(selectedWorkoutId), sessionName);
+      // Load full session data
+      const fullWorkout = await getWorkoutWithExercises(Number(selectedWorkoutId));
+      setSession({
+        id: newSession.id,
+        name: sessionName,
+        status: "in_progress",
+        startedAt: new Date(),
+        workoutId: Number(selectedWorkoutId),
+        sets: [],
+        workout: fullWorkout
+          ? {
+              id: fullWorkout.id,
+              name: fullWorkout.name,
+              workoutExercises: fullWorkout.workoutExercises,
+            }
+          : null,
+      });
+      setStartDialogOpen(false);
+      toast.success(`${sessionName} started! Let's go! 💪`);
+    });
+  };
+
+  const handleLogSet = (exerciseId: number) => {
+    if (!session) return;
+    const { weight, reps } = inputs[exerciseId] ?? { weight: "", reps: "" };
+    const w = parseFloat(weight);
+    const r = parseInt(reps, 10);
+    if (isNaN(w) || isNaN(r) || w <= 0 || r <= 0) {
+      toast.error("Enter valid weight and reps.");
+      return;
+    }
+
+    // Count existing sets for this exercise
+    const existingSets = (session.sets).filter(
+      (s) => s.exerciseId === exerciseId
+    );
+    const setNumber = existingSets.length + 1;
+
+    startTransition(async () => {
+      const newSet = await logSet({
+        sessionId: session.id,
+        exerciseId,
+        setNumber,
+        weight: w,
+        reps: r,
+        isCompleted: true,
+      });
+      setSession((prev) =>
+        prev ? { ...prev, sets: [...prev.sets, newSet] } : prev
+      );
+      // Clear inputs for this exercise
+      setInputs((prev) => ({ ...prev, [exerciseId]: { weight: "", reps: "" } }));
+      toast.success(`Set ${setNumber} logged ✓`, { duration: 1500 });
+    });
+  };
+
+  const handleToggleSet = (setId: number, current: boolean) => {
+    startTransition(async () => {
+      await toggleSetComplete(setId, !current);
+      setSession((prev) =>
+        prev
+          ? {
+              ...prev,
+              sets: prev.sets.map((s) =>
+                s.id === setId ? { ...s, isCompleted: !current } : s
+              ),
+            }
+          : prev
+      );
+    });
+  };
+
+  const handleDeleteSet = (setId: number) => {
+    startTransition(async () => {
+      await deleteSet(setId);
+      setSession((prev) =>
+        prev
+          ? { ...prev, sets: prev.sets.filter((s) => s.id !== setId) }
+          : prev
+      );
+    });
+  };
+
+  const handleCompleteSession = () => {
+    if (!session) return;
+    startTransition(async () => {
+      await completeSession(session.id);
+      setSession(null);
+      setCompleteDialogOpen(false);
+      toast.success("Workout complete! Great work! 🏆");
+      router.refresh();
+    });
+  };
+
+  const handleCancelSession = () => {
+    if (!session) return;
+    startTransition(async () => {
+      await cancelSession(session.id);
+      setSession(null);
+      toast("Session cancelled.");
+      router.refresh();
+    });
+  };
+
+  // Compute completion stats
+  const completedSets = session?.sets.filter((s) => s.isCompleted).length ?? 0;
+  const totalTargetSets =
+    session?.workout?.workoutExercises.reduce(
+      (acc, we) => acc + we.targetSets,
+      0
+    ) ?? 0;
+  const progressPct =
+    totalTargetSets > 0 ? (completedSets / totalTargetSets) * 100 : 0;
+
+  // ── NO ACTIVE SESSION ─────────────────────────────────────────────────────
+
+  if (!session) {
+    return (
+      <div className="space-y-5">
+        <Card className="glass border-border/50 overflow-hidden">
+          <div className="h-1 bg-gradient-to-r from-primary to-chart-2" />
+          <CardContent className="py-10 text-center">
+            <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-5 glow-brand">
+              <Dumbbell className="w-10 h-10 text-primary" />
+            </div>
+            <h3 className="text-xl font-bold text-foreground mb-2">
+              Ready to Train?
+            </h3>
+            <p className="text-muted-foreground text-sm mb-6 max-w-xs mx-auto">
+              Start a workout session based on one of your planned programs.
+            </p>
+            <Button
+              id="btn-start-session"
+              onClick={() => setStartDialogOpen(true)}
+              size="lg"
+              className="bg-primary text-primary-foreground gap-2 shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-shadow"
+            >
+              <Play className="w-5 h-5 fill-current" />
+              Start Workout
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Quick-start dialog */}
+        <Dialog open={startDialogOpen} onOpenChange={setStartDialogOpen}>
+          <DialogContent className="bg-card border-border/50 max-w-sm mx-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Play className="w-5 h-5 text-primary fill-current" />
+                Start Workout
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 mt-2">
+              <div>
+                <label className="text-sm font-medium text-muted-foreground">
+                  Program
+                </label>
+                <Select
+                  value={selectedProgramId}
+                  onValueChange={handleProgramChange}
+                >
+                  <SelectTrigger
+                    id="select-program"
+                    className="mt-1.5 bg-secondary/50 border-border/50"
+                  >
+                    <SelectValue placeholder="Select program..." />
+                  </SelectTrigger>
+                  <SelectContent className="bg-card border-border/50">
+                    {programs.map((p) => (
+                      <SelectItem key={p.id} value={String(p.id)}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {workouts.length > 0 && (
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">
+                    Workout Day
+                  </label>
+                  <Select
+                    value={selectedWorkoutId}
+                    onValueChange={(v) => v && setSelectedWorkoutId(v)}
+                  >
+                    <SelectTrigger
+                      id="select-workout"
+                      className="mt-1.5 bg-secondary/50 border-border/50"
+                    >
+                      <SelectValue placeholder="Select day..." />
+                    </SelectTrigger>
+                    <SelectContent className="bg-card border-border/50">
+                      {workouts.map((w) => (
+                        <SelectItem key={w.id} value={String(w.id)}>
+                          {w.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <Button
+                id="btn-confirm-start"
+                onClick={handleStartSession}
+                disabled={!selectedWorkoutId || isPending}
+                className="w-full bg-primary text-primary-foreground gap-2"
+                size="lg"
+              >
+                <Play className="w-4 h-4 fill-current" />
+                {isPending ? "Starting..." : "Start Session"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  }
+
+  // ── ACTIVE SESSION ────────────────────────────────────────────────────────
+
+  return (
+    <div className="space-y-5">
+      {/* Session header */}
+      <Card className="glass border-border/50 overflow-hidden">
+        <div className="h-1 bg-gradient-to-r from-primary to-chart-2" />
+        <CardContent className="pt-4 pb-3">
+          <div className="flex items-start justify-between mb-3">
+            <div>
+              <div className="flex items-center gap-2 mb-0.5">
+                <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                <span className="text-xs font-semibold text-primary uppercase tracking-wider">
+                  In Progress
+                </span>
+              </div>
+              <h2 className="text-xl font-bold text-foreground">
+                {session.name}
+              </h2>
+            </div>
+            <button
+              id="btn-cancel-session"
+              onClick={handleCancelSession}
+              className="p-2 rounded-xl text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+              aria-label="Cancel session"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Progress bar */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>
+                {completedSets} / {totalTargetSets} sets
+              </span>
+              <span>{Math.round(progressPct)}%</span>
+            </div>
+            <Progress value={progressPct} className="h-2 bg-secondary" />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Exercise cards */}
+      {session.workout?.workoutExercises.map((we) => {
+        const exerciseSets = session.sets.filter(
+          (s) => s.exerciseId === we.exerciseId
+        );
+        const completedCount = exerciseSets.filter((s) => s.isCompleted).length;
+        const allDone = completedCount >= we.targetSets;
+        const input = inputs[we.exerciseId] ?? { weight: "", reps: "" };
+        const isCollapsed = collapsedExercises.has(we.exerciseId);
+
+        return (
+          <Card
+            key={we.id}
+            className={cn(
+              "glass border-border/50 overflow-hidden transition-all duration-200",
+              allDone && "border-primary/30 bg-primary/3"
+            )}
+          >
+            {/* Exercise header */}
+            <button
+              id={`exercise-toggle-${we.exerciseId}`}
+              className="w-full text-left"
+              onClick={() =>
+                setCollapsedExercises((prev) => {
+                  const next = new Set(prev);
+                  next.has(we.exerciseId)
+                    ? next.delete(we.exerciseId)
+                    : next.add(we.exerciseId);
+                  return next;
+                })
+              }
+            >
+              <CardHeader className="pb-0 pt-4 px-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      className={cn(
+                        "w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold transition-colors",
+                        allDone
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-secondary text-muted-foreground"
+                      )}
+                    >
+                      {allDone ? (
+                        <CheckCircle2 className="w-4 h-4" />
+                      ) : (
+                        <span>{completedCount}/{we.targetSets}</span>
+                      )}
+                    </div>
+                    <div>
+                      <CardTitle className="text-sm font-semibold">
+                        {we.exercise.name}
+                      </CardTitle>
+                      <p className="text-xs text-muted-foreground">
+                        {we.targetSets} sets · {we.targetRepsMin}–
+                        {we.targetRepsMax} reps
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge
+                      variant="secondary"
+                      className="text-[10px] capitalize bg-primary/10 text-primary border-0 hidden sm:flex"
+                    >
+                      {we.exercise.muscleGroup.replace("_", " ")}
+                    </Badge>
+                    {isCollapsed ? (
+                      <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronUp className="w-4 h-4 text-muted-foreground" />
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
+            </button>
+
+            {!isCollapsed && (
+              <CardContent className="pt-3 pb-4 px-4 space-y-3">
+                {/* Logged sets */}
+                {exerciseSets.length > 0 && (
+                  <div className="space-y-1.5">
+                    {/* Table header */}
+                    <div className="grid grid-cols-[32px_1fr_1fr_32px_32px] gap-2 px-1">
+                      <span className="text-[10px] text-muted-foreground font-medium">#</span>
+                      <span className="text-[10px] text-muted-foreground font-medium text-center">KG</span>
+                      <span className="text-[10px] text-muted-foreground font-medium text-center">REPS</span>
+                      <span className="text-[10px] text-muted-foreground font-medium text-center">✓</span>
+                      <span />
+                    </div>
+                    {exerciseSets.map((set) => (
+                      <div
+                        key={set.id}
+                        className={cn(
+                          "grid grid-cols-[32px_1fr_1fr_32px_32px] gap-2 items-center px-1 py-1.5 rounded-lg transition-colors",
+                          set.isCompleted
+                            ? "bg-primary/8 text-foreground"
+                            : "bg-secondary/30 text-muted-foreground"
+                        )}
+                      >
+                        <span className="text-xs font-bold text-center text-muted-foreground">
+                          {set.setNumber}
+                        </span>
+                        <span className="text-sm font-semibold text-center">
+                          {set.weight}
+                        </span>
+                        <span className="text-sm font-semibold text-center">
+                          {set.reps}
+                        </span>
+                        <button
+                          id={`btn-toggle-set-${set.id}`}
+                          onClick={() =>
+                            handleToggleSet(set.id, set.isCompleted)
+                          }
+                          className="flex items-center justify-center"
+                          aria-label={
+                            set.isCompleted ? "Mark incomplete" : "Mark complete"
+                          }
+                        >
+                          {set.isCompleted ? (
+                            <CheckCircle2 className="w-5 h-5 text-primary" />
+                          ) : (
+                            <Circle className="w-5 h-5 text-muted-foreground/50" />
+                          )}
+                        </button>
+                        <button
+                          id={`btn-delete-set-${set.id}`}
+                          onClick={() => handleDeleteSet(set.id)}
+                          className="flex items-center justify-center text-muted-foreground/40 hover:text-destructive transition-colors"
+                          aria-label="Delete set"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Input row */}
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 relative">
+                    <Input
+                      id={`weight-input-${we.exerciseId}`}
+                      type="number"
+                      inputMode="decimal"
+                      placeholder={we.targetWeight ? String(we.targetWeight) : "kg"}
+                      value={input.weight}
+                      onChange={(e) =>
+                        setInputs((prev) => ({
+                          ...prev,
+                          [we.exerciseId]: { ...input, weight: e.target.value },
+                        }))
+                      }
+                      className="bg-secondary/50 border-border/50 text-center pr-8 h-11 text-base font-semibold"
+                    />
+                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">
+                      kg
+                    </span>
+                  </div>
+                  <span className="text-muted-foreground text-sm font-medium">×</span>
+                  <div className="flex-1 relative">
+                    <Input
+                      id={`reps-input-${we.exerciseId}`}
+                      type="number"
+                      inputMode="numeric"
+                      placeholder={we.targetRepsMin ? String(we.targetRepsMin) : "reps"}
+                      value={input.reps}
+                      onChange={(e) =>
+                        setInputs((prev) => ({
+                          ...prev,
+                          [we.exerciseId]: { ...input, reps: e.target.value },
+                        }))
+                      }
+                      onKeyDown={(e) =>
+                        e.key === "Enter" && handleLogSet(we.exerciseId)
+                      }
+                      className="bg-secondary/50 border-border/50 text-center pr-10 h-11 text-base font-semibold"
+                    />
+                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">
+                      reps
+                    </span>
+                  </div>
+                  <Button
+                    id={`btn-log-set-${we.exerciseId}`}
+                    onClick={() => handleLogSet(we.exerciseId)}
+                    disabled={isPending}
+                    size="icon"
+                    className="h-11 w-11 bg-primary text-primary-foreground hover:bg-primary/90 shrink-0 shadow-md shadow-primary/20"
+                    aria-label="Log set"
+                  >
+                    <Plus className="w-5 h-5" />
+                  </Button>
+                </div>
+              </CardContent>
+            )}
+          </Card>
+        );
+      })}
+
+      {/* Finish button */}
+      <div className="sticky bottom-20 pt-2">
+        <Button
+          id="btn-finish-session"
+          onClick={() => setCompleteDialogOpen(true)}
+          size="lg"
+          className="w-full bg-primary text-primary-foreground gap-2 shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow py-6 text-base font-semibold"
+        >
+          <Flag className="w-5 h-5" />
+          Finish Workout
+        </Button>
+      </div>
+
+      {/* Completion dialog */}
+      <Dialog open={completeDialogOpen} onOpenChange={setCompleteDialogOpen}>
+        <DialogContent className="bg-card border-border/50 max-w-sm mx-auto text-center">
+          <DialogHeader>
+            <div className="flex justify-center mb-2">
+              <div className="w-16 h-16 rounded-full bg-primary/15 flex items-center justify-center glow-brand">
+                <Trophy className="w-8 h-8 text-primary" />
+              </div>
+            </div>
+            <DialogTitle className="text-xl font-bold">
+              Finish Workout?
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-muted-foreground text-sm mb-2">
+            You completed{" "}
+            <span className="text-foreground font-semibold">
+              {completedSets} sets
+            </span>{" "}
+            across{" "}
+            <span className="text-foreground font-semibold">
+              {session.workout?.workoutExercises.length ?? 0} exercises
+            </span>
+            . Great session!
+          </p>
+          <div className="flex flex-col gap-2 mt-4">
+            <Button
+              id="btn-confirm-complete"
+              onClick={handleCompleteSession}
+              disabled={isPending}
+              className="w-full bg-primary text-primary-foreground gap-2"
+              size="lg"
+            >
+              <CheckCircle2 className="w-5 h-5" />
+              {isPending ? "Saving..." : "Complete Session"}
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => setCompleteDialogOpen(false)}
+              className="text-muted-foreground"
+            >
+              Keep Going
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
