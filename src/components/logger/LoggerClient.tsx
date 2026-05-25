@@ -185,21 +185,19 @@ function ActiveRestTimer({
           const options = {
             body: `Time for your next set of ${exerciseName}.`,
             icon: "/icon-192.png",
-            tag: "rest-timer",
           };
-          if ("serviceWorker" in navigator) {
-            navigator.serviceWorker.getRegistration().then((reg) => {
-              if (reg) {
-                reg.showNotification(title, options).catch((e) => {
-                  console.error("SW Notification failed", e);
-                  new Notification(title, options);
-                });
-              } else {
-                new Notification(title, options);
-              }
-            });
-          } else {
+          
+          try {
+            // Standard approach (Works on Desktop and iOS PWA)
             new Notification(title, options);
+          } catch (e) {
+            console.error("Standard Notification failed, trying SW fallback:", e);
+            // Fallback for Chrome on Android which requires Service Worker
+            if ("serviceWorker" in navigator) {
+              navigator.serviceWorker.ready.then((reg) => {
+                reg.showNotification(title, options);
+              });
+            }
           }
         }
 
