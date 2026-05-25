@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useEffect } from "react";
+import { useState, useTransition, useEffect, useRef } from "react";
 import { Program } from "@/db/schema";
 import {
   getWorkoutsForProgram,
@@ -26,7 +26,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Command,
   CommandEmpty,
@@ -168,7 +172,9 @@ function ActiveRestTimer({
   exerciseName: string;
   onClose: () => void;
 }) {
-  const [left, setLeft] = useState(Math.max(0, Math.ceil((endTime - Date.now()) / 1000)));
+  const [left, setLeft] = useState(
+    Math.max(0, Math.ceil((endTime - Date.now()) / 1000)),
+  );
 
   useEffect(() => {
     setLeft(Math.max(0, Math.ceil((endTime - Date.now()) / 1000)));
@@ -178,7 +184,8 @@ function ActiveRestTimer({
       if (remaining <= 0) {
         clearInterval(interval);
         toast.success("Rest time is over! Let's get back to work 💪");
-        
+        console.log("is notification");
+
         // Push Notification logic
         if ("Notification" in window && Notification.permission === "granted") {
           const title = "Rest Time is Over! 💪";
@@ -186,12 +193,15 @@ function ActiveRestTimer({
             body: `Time for your next set of ${exerciseName}.`,
             icon: "/icon-192.png",
           };
-          
+
           try {
             // Standard approach (Works on Desktop and iOS PWA)
             new Notification(title, options);
           } catch (e) {
-            console.error("Standard Notification failed, trying SW fallback:", e);
+            console.error(
+              "Standard Notification failed, trying SW fallback:",
+              e,
+            );
             // Fallback for Chrome on Android which requires Service Worker
             if ("serviceWorker" in navigator) {
               navigator.serviceWorker.ready.then((reg) => {
@@ -231,16 +241,55 @@ function ActiveRestTimer({
   );
 }
 
-function InlineRestTimer({ endTime }: { endTime: number }) {
-  const [left, setLeft] = useState(Math.max(0, Math.ceil((endTime - Date.now()) / 1000)));
+function InlineRestTimer({
+  endTime,
+  exerciseName,
+}: {
+  endTime: number;
+  exerciseName: string;
+}) {
+  const [left, setLeft] = useState(
+    Math.max(0, Math.ceil((endTime - Date.now()) / 1000)),
+  );
+
+  const hasNotified = useRef(false);
 
   useEffect(() => {
+    hasNotified.current = false;
     setLeft(Math.max(0, Math.ceil((endTime - Date.now()) / 1000)));
     const interval = setInterval(() => {
-      setLeft(Math.max(0, Math.ceil((endTime - Date.now()) / 1000)));
+      const remaining = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
+      setLeft(remaining);
+
+      if (remaining <= 0 && !hasNotified.current) {
+        hasNotified.current = true;
+        clearInterval(interval);
+        toast.success("Rest time is over! Let's get back to work 💪");
+
+        if ("Notification" in window && Notification.permission === "granted") {
+          const title = "Rest Time is Over! 💪";
+          const options = {
+            body: `Time for your next set of ${exerciseName}.`,
+            icon: "/icon-192.png",
+          };
+          try {
+            new Notification(title, options);
+          } catch (e) {
+            console.error(
+              "Standard Notification failed, trying SW fallback:",
+              e,
+            );
+            if ("serviceWorker" in navigator) {
+              navigator.serviceWorker.ready.then((reg) => {
+                reg.showNotification(title, options);
+              });
+            }
+          }
+        }
+      }
     }, 1000);
     return () => clearInterval(interval);
-  }, [endTime]);
+  }, [endTime, exerciseName]);
 
   if (left <= 0) return null;
 
@@ -248,7 +297,10 @@ function InlineRestTimer({ endTime }: { endTime: number }) {
   const s = left % 60;
 
   return (
-    <Badge variant="outline" className="ml-2 bg-primary/10 text-primary border-primary/20 font-mono text-xs px-1.5">
+    <Badge
+      variant="outline"
+      className="ml-2 bg-primary/10 text-primary border-primary/20 font-mono text-xs px-1.5"
+    >
       <Clock className="w-3 h-3 mr-1 inline" />
       {m}:{s.toString().padStart(2, "0")}
     </Badge>
@@ -267,8 +319,14 @@ function SortableSetRow({
   onDelete: (id: number) => void;
   onEdit: (id: number, weight: number, reps: number) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: set.id });
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: set.id });
 
   const [localWeight, setLocalWeight] = useState(String(set.weight));
   const [localReps, setLocalReps] = useState(String(set.reps));
@@ -307,7 +365,7 @@ function SortableSetRow({
         set.isCompleted
           ? "bg-primary/8 text-foreground"
           : "bg-secondary/30 text-muted-foreground",
-        isDragging && "shadow-md ring-1 ring-primary/20 opacity-90"
+        isDragging && "shadow-md ring-1 ring-primary/20 opacity-90",
       )}
     >
       <button
@@ -375,10 +433,14 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
   // Start session flow
   const [startDialogOpen, setStartDialogOpen] = useState(false);
   const [selectedProgramId, setSelectedProgramId] = useState<string>(() => {
-    return String(programs.find((p) => p.isActive)?.id ?? programs[0]?.id ?? "");
+    return String(
+      programs.find((p) => p.isActive)?.id ?? programs[0]?.id ?? "",
+    );
   });
-  const [workouts, setWorkouts] = useState<Awaited<ReturnType<typeof getWorkoutsForProgram>>>([]);
-  
+  const [workouts, setWorkouts] = useState<
+    Awaited<ReturnType<typeof getWorkoutsForProgram>>
+  >([]);
+
   useEffect(() => {
     if (selectedProgramId && workouts.length === 0) {
       startTransition(async () => {
@@ -386,7 +448,7 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
         setWorkouts(wkts);
       });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [selectedWorkoutId, setSelectedWorkoutId] = useState<string>("");
   const [sessionDate, setSessionDate] = useState<string>(() => {
@@ -394,7 +456,7 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
     const offset = today.getTimezoneOffset() * 60000;
     return new Date(today.getTime() - offset).toISOString().split("T")[0];
   });
-  
+
   const [programOpen, setProgramOpen] = useState(false);
   const [workoutOpen, setWorkoutOpen] = useState(false);
 
@@ -406,9 +468,13 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
   } | null>(null);
 
   const startRestTimer = (exerciseId: number, completedCount: number) => {
-    const we = session?.workout?.workoutExercises.find((w) => w.exerciseId === exerciseId);
+    const we = session?.workout?.workoutExercises.find(
+      (w) => w.exerciseId === exerciseId,
+    );
     const isLastSet = we ? completedCount >= we.targetSets : false;
-    const restSeconds = isLastSet ? (we?.restTimerExercise ?? 120) : (we?.restTimerSets ?? 90);
+    const restSeconds = isLastSet
+      ? (we?.restTimerExercise ?? 120)
+      : (we?.restTimerSets ?? 90);
     setActiveRest({
       endTime: Date.now() + restSeconds * 1000,
       exerciseName: we?.exercise.name ?? "Exercise",
@@ -422,7 +488,9 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
   >({});
 
   // Collapsed exercises
-  const [collapsedExercises, setCollapsedExercises] = useState<Set<number>>(new Set());
+  const [collapsedExercises, setCollapsedExercises] = useState<Set<number>>(
+    new Set(),
+  );
 
   // Complete dialog
   const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
@@ -439,23 +507,33 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
     if (!selectedWorkoutId) return;
 
     // Request notification permissions for the Rest Timer
-    if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
+    if (
+      "Notification" in window &&
+      Notification.permission !== "granted" &&
+      Notification.permission !== "denied"
+    ) {
       Notification.requestPermission();
     }
 
     startTransition(async () => {
       const wkt = workouts.find((w) => w.id === Number(selectedWorkoutId));
       const sessionName = wkt?.name ?? "Workout";
-      
+
       let startedAt = new Date();
       if (sessionDate) {
         const [year, month, day] = sessionDate.split("-").map(Number);
         startedAt.setFullYear(year, month - 1, day);
       }
-      
-      const newSession = await startSession(Number(selectedWorkoutId), sessionName, startedAt);
+
+      const newSession = await startSession(
+        Number(selectedWorkoutId),
+        sessionName,
+        startedAt,
+      );
       // Load full session data
-      const fullWorkout = await getWorkoutWithExercises(Number(selectedWorkoutId));
+      const fullWorkout = await getWorkoutWithExercises(
+        Number(selectedWorkoutId),
+      );
       setSession({
         id: newSession.id,
         name: sessionName,
@@ -478,11 +556,15 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
 
   const handleLogSet = (exerciseId: number) => {
     if (!session) return;
-    
-    if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
+
+    if (
+      "Notification" in window &&
+      Notification.permission !== "granted" &&
+      Notification.permission !== "denied"
+    ) {
       Notification.requestPermission();
     }
-    
+
     const { weight, reps } = inputs[exerciseId] ?? { weight: "", reps: "" };
     const w = parseFloat(weight);
     const r = parseInt(reps, 10);
@@ -492,8 +574,8 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
     }
 
     // Count existing sets for this exercise
-    const existingSets = (session.sets).filter(
-      (s) => s.exerciseId === exerciseId
+    const existingSets = session.sets.filter(
+      (s) => s.exerciseId === exerciseId,
     );
     const setNumber = existingSets.length + 1;
 
@@ -507,22 +589,30 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
         isCompleted: true,
       });
       setSession((prev) =>
-        prev ? { ...prev, sets: [...prev.sets, newSet] } : prev
+        prev ? { ...prev, sets: [...prev.sets, newSet] } : prev,
       );
       // Clear inputs for this exercise
-      setInputs((prev) => ({ ...prev, [exerciseId]: { weight: "", reps: "" } }));
-      
-      const completedCount = existingSets.filter((s) => s.isCompleted).length + 1;
+      setInputs((prev) => ({
+        ...prev,
+        [exerciseId]: { weight: "", reps: "" },
+      }));
+
+      const completedCount =
+        existingSets.filter((s) => s.isCompleted).length + 1;
       startRestTimer(exerciseId, completedCount);
       toast.success(`Set ${setNumber} logged ✓`, { duration: 1500 });
     });
   };
 
   const handleToggleSet = (setId: number, current: boolean) => {
-    if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
+    if (
+      "Notification" in window &&
+      Notification.permission !== "granted" &&
+      Notification.permission !== "denied"
+    ) {
       Notification.requestPermission();
     }
-    
+
     startTransition(async () => {
       await toggleSetComplete(setId, !current);
       setSession((prev) =>
@@ -530,17 +620,20 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
           ? {
               ...prev,
               sets: prev.sets.map((s) =>
-                s.id === setId ? { ...s, isCompleted: !current } : s
+                s.id === setId ? { ...s, isCompleted: !current } : s,
               ),
             }
-          : prev
+          : prev,
       );
       if (!current) {
         // Find the exercise ID for this set
         const set = session?.sets.find((s) => s.id === setId);
         if (set) {
-          const existingSets = session?.sets.filter((s) => s.exerciseId === set.exerciseId) || [];
-          const completedCount = existingSets.filter((s) => s.isCompleted || s.id === setId).length;
+          const existingSets =
+            session?.sets.filter((s) => s.exerciseId === set.exerciseId) || [];
+          const completedCount = existingSets.filter(
+            (s) => s.isCompleted || s.id === setId,
+          ).length;
           startRestTimer(set.exerciseId, completedCount);
         }
       }
@@ -553,7 +646,7 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
       setSession((prev) =>
         prev
           ? { ...prev, sets: prev.sets.filter((s) => s.id !== setId) }
-          : prev
+          : prev,
       );
     });
   };
@@ -566,10 +659,10 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
           ? {
               ...prev,
               sets: prev.sets.map((s) =>
-                s.id === setId ? { ...s, weight, reps } : s
+                s.id === setId ? { ...s, weight, reps } : s,
               ),
             }
-          : prev
+          : prev,
       );
     });
   };
@@ -582,22 +675,27 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
     }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
-    })
+    }),
   );
 
   const handleDragEnd = (event: DragEndEvent, exerciseId: number) => {
     const { active, over } = event;
     if (!over || active.id === over.id || !session) return;
 
-    const exerciseSets = session.sets.filter((s) => s.exerciseId === exerciseId);
+    const exerciseSets = session.sets.filter(
+      (s) => s.exerciseId === exerciseId,
+    );
     const oldIndex = exerciseSets.findIndex((s) => s.id === active.id);
     const newIndex = exerciseSets.findIndex((s) => s.id === over.id);
 
     if (oldIndex !== -1 && newIndex !== -1) {
       const newSetsList = arrayMove(exerciseSets, oldIndex, newIndex);
-      
+
       // Re-assign set numbers
-      const updatedSets = newSetsList.map((s, idx) => ({ ...s, setNumber: idx + 1 }));
+      const updatedSets = newSetsList.map((s, idx) => ({
+        ...s,
+        setNumber: idx + 1,
+      }));
 
       // Update local state optimistically
       setSession((prev) => {
@@ -606,8 +704,9 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
         return {
           ...prev,
           sets: [...otherSets, ...updatedSets].sort((a, b) => {
-             if (a.exerciseId !== b.exerciseId) return a.exerciseId - b.exerciseId;
-             return a.setNumber - b.setNumber;
+            if (a.exerciseId !== b.exerciseId)
+              return a.exerciseId - b.exerciseId;
+            return a.setNumber - b.setNumber;
           }),
         };
       });
@@ -615,7 +714,7 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
       // Persist order to DB
       startTransition(async () => {
         await reorderSets(
-          updatedSets.map((s) => ({ id: s.id, setNumber: s.setNumber }))
+          updatedSets.map((s) => ({ id: s.id, setNumber: s.setNumber })),
         );
       });
     }
@@ -647,7 +746,7 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
   const totalTargetSets =
     session?.workout?.workoutExercises.reduce(
       (acc, we) => acc + we.targetSets,
-      0
+      0,
     ) ?? 0;
   const progressPct =
     totalTargetSets > 0 ? (completedSets / totalTargetSets) * 100 : 0;
@@ -699,13 +798,14 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
                   <PopoverTrigger
                     className={cn(
                       buttonVariants({ variant: "outline" }),
-                      "w-full justify-between mt-1.5 bg-secondary/50 border-border/50 text-foreground font-normal"
+                      "w-full justify-between mt-1.5 bg-secondary/50 border-border/50 text-foreground font-normal",
                     )}
                     role="combobox"
                     aria-expanded={programOpen}
                   >
                     {selectedProgramId
-                      ? programs.find((p) => String(p.id) === selectedProgramId)?.name
+                      ? programs.find((p) => String(p.id) === selectedProgramId)
+                          ?.name
                       : "Select program..."}
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </PopoverTrigger>
@@ -727,7 +827,9 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
                               <Check
                                 className={cn(
                                   "mr-2 h-4 w-4 text-primary",
-                                  selectedProgramId === String(p.id) ? "opacity-100" : "opacity-0"
+                                  selectedProgramId === String(p.id)
+                                    ? "opacity-100"
+                                    : "opacity-0",
                                 )}
                               />
                               {p.name}
@@ -750,13 +852,15 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
                       <PopoverTrigger
                         className={cn(
                           buttonVariants({ variant: "outline" }),
-                          "w-full justify-between mt-1.5 bg-secondary/50 border-border/50 text-foreground font-normal"
+                          "w-full justify-between mt-1.5 bg-secondary/50 border-border/50 text-foreground font-normal",
                         )}
                         role="combobox"
                         aria-expanded={workoutOpen}
                       >
                         {selectedWorkoutId
-                          ? workouts.find((w) => String(w.id) === selectedWorkoutId)?.name
+                          ? workouts.find(
+                              (w) => String(w.id) === selectedWorkoutId,
+                            )?.name
                           : "Select day..."}
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </PopoverTrigger>
@@ -778,7 +882,9 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
                                   <Check
                                     className={cn(
                                       "mr-2 h-4 w-4 text-primary",
-                                      selectedWorkoutId === String(w.id) ? "opacity-100" : "opacity-0"
+                                      selectedWorkoutId === String(w.id)
+                                        ? "opacity-100"
+                                        : "opacity-0",
                                     )}
                                   />
                                   {w.name}
@@ -825,12 +931,16 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
 
   let estMinutes = 0;
   if (session.workout?.workoutExercises) {
-    const estTimeSeconds = session.workout.workoutExercises.reduce((total, we) => {
-      const repsTime = we.targetSets * ((we.targetRepsMax || 10) * 3);
-      const setsRestTime = Math.max(0, we.targetSets - 1) * (we.restTimerSets ?? 90);
-      const exerciseRestTime = we.restTimerExercise ?? 120;
-      return total + repsTime + setsRestTime + exerciseRestTime;
-    }, 0);
+    const estTimeSeconds = session.workout.workoutExercises.reduce(
+      (total, we) => {
+        const repsTime = we.targetSets * ((we.targetRepsMax || 10) * 3);
+        const setsRestTime =
+          Math.max(0, we.targetSets - 1) * (we.restTimerSets ?? 90);
+        const exerciseRestTime = we.restTimerExercise ?? 120;
+        return total + repsTime + setsRestTime + exerciseRestTime;
+      },
+      0,
+    );
     estMinutes = Math.round(estTimeSeconds / 60);
   }
 
@@ -851,7 +961,10 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
                 </div>
                 <SessionTimer startedAt={session.startedAt} />
                 {estMinutes > 0 && (
-                  <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground border-border/50 py-0 h-5">
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] font-normal text-muted-foreground border-border/50 py-0 h-5"
+                  >
                     Est. ~{estMinutes}m
                   </Badge>
                 )}
@@ -886,7 +999,7 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
       {/* Exercise cards */}
       {session.workout?.workoutExercises.map((we) => {
         const exerciseSets = session.sets.filter(
-          (s) => s.exerciseId === we.exerciseId
+          (s) => s.exerciseId === we.exerciseId,
         );
         const completedCount = exerciseSets.filter((s) => s.isCompleted).length;
         const allDone = completedCount >= we.targetSets;
@@ -898,7 +1011,7 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
             key={we.id}
             className={cn(
               "glass border-border/50 overflow-hidden transition-all duration-200",
-              allDone && "border-primary/30 bg-primary/3"
+              allDone && "border-primary/30 bg-primary/3",
             )}
           >
             {/* Exercise header */}
@@ -923,20 +1036,25 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
                         "w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold transition-colors",
                         allDone
                           ? "bg-primary text-primary-foreground"
-                          : "bg-secondary text-muted-foreground"
+                          : "bg-secondary text-muted-foreground",
                       )}
                     >
                       {allDone ? (
                         <CheckCircle2 className="w-4 h-4" />
                       ) : (
-                        <span>{completedCount}/{we.targetSets}</span>
+                        <span>
+                          {completedCount}/{we.targetSets}
+                        </span>
                       )}
                     </div>
                     <div>
                       <CardTitle className="text-sm font-semibold flex items-center">
                         {we.exercise.name}
                         {activeRest?.exerciseId === we.exerciseId && (
-                          <InlineRestTimer endTime={activeRest.endTime} />
+                          <InlineRestTimer
+                            endTime={activeRest.endTime}
+                            exerciseName={activeRest.exerciseName}
+                          />
                         )}
                       </CardTitle>
                       <p className="text-xs text-muted-foreground mt-0.5">
@@ -944,7 +1062,8 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
                         {we.targetRepsMax} reps
                       </p>
                       <p className="text-[10px] text-muted-foreground/70 mt-0.5">
-                        Rest: {we.restTimerSets ?? 90}s · {we.restTimerExercise ?? 120}s
+                        Rest: {we.restTimerSets ?? 90}s ·{" "}
+                        {we.restTimerExercise ?? 120}s
                       </p>
                     </div>
                   </div>
@@ -973,10 +1092,18 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
                     {/* Table header */}
                     <div className="grid grid-cols-[24px_24px_1fr_1fr_32px_32px] gap-2 px-1">
                       <span />
-                      <span className="text-[10px] text-muted-foreground font-medium text-center">#</span>
-                      <span className="text-[10px] text-muted-foreground font-medium text-center">KG</span>
-                      <span className="text-[10px] text-muted-foreground font-medium text-center">REPS</span>
-                      <span className="text-[10px] text-muted-foreground font-medium text-center">✓</span>
+                      <span className="text-[10px] text-muted-foreground font-medium text-center">
+                        #
+                      </span>
+                      <span className="text-[10px] text-muted-foreground font-medium text-center">
+                        KG
+                      </span>
+                      <span className="text-[10px] text-muted-foreground font-medium text-center">
+                        REPS
+                      </span>
+                      <span className="text-[10px] text-muted-foreground font-medium text-center">
+                        ✓
+                      </span>
                       <span />
                     </div>
                     <DndContext
@@ -1009,7 +1136,9 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
                       id={`weight-input-${we.exerciseId}`}
                       type="number"
                       inputMode="decimal"
-                      placeholder={we.targetWeight ? String(we.targetWeight) : "kg"}
+                      placeholder={
+                        we.targetWeight ? String(we.targetWeight) : "kg"
+                      }
                       value={input.weight}
                       onChange={(e) =>
                         setInputs((prev) => ({
@@ -1023,13 +1152,17 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
                       kg
                     </span>
                   </div>
-                  <span className="text-muted-foreground text-sm font-medium">×</span>
+                  <span className="text-muted-foreground text-sm font-medium">
+                    ×
+                  </span>
                   <div className="flex-1 relative">
                     <Input
                       id={`reps-input-${we.exerciseId}`}
                       type="number"
                       inputMode="numeric"
-                      placeholder={we.targetRepsMin ? String(we.targetRepsMin) : "reps"}
+                      placeholder={
+                        we.targetRepsMin ? String(we.targetRepsMin) : "reps"
+                      }
                       value={input.reps}
                       onChange={(e) =>
                         setInputs((prev) => ({
