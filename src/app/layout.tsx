@@ -27,6 +27,11 @@ export const metadata: Metadata = {
     description: "Track progressive overload and plan workouts",
     siteName: "IronLog",
   },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "IronLog",
+  },
 };
 
 export const viewport: Viewport = {
