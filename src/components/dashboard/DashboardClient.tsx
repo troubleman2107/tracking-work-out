@@ -178,31 +178,33 @@ export function DashboardClient({
               Select Exercise
             </label>
             <Popover open={exerciseOpen} onOpenChange={setExerciseOpen}>
-              <PopoverTrigger asChild className={"w-full"}>
-                <Button
-                  variant="outline"
-                  role="combobox"
-                  aria-expanded={exerciseOpen}
-                  className={cn(
-                    "w-full justify-between bg-secondary/50 border-border/50 h-12 text-base font-normal",
-                    !selectedExerciseId && "text-muted-foreground",
-                  )}
-                >
-                  {selectedExerciseId ? (
-                    <div className="flex items-center gap-2 truncate">
-                      <span className="truncate">{selectedExercise?.name}</span>
-                      <Badge
-                        variant="secondary"
-                        className="text-[10px] capitalize bg-primary/10 text-primary border-0 shrink-0"
-                      >
-                        {selectedExercise?.muscleGroup.replace("_", " ")}
-                      </Badge>
-                    </div>
-                  ) : (
-                    "Search an exercise..."
-                  )}
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
+              <PopoverTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={exerciseOpen}
+                    className={cn(
+                      "w-full justify-between bg-secondary/50 border-border/50 h-12 text-base font-normal",
+                      !selectedExerciseId && "text-muted-foreground",
+                    )}
+                  />
+                }
+              >
+                {selectedExerciseId ? (
+                  <div className="flex items-center gap-2 truncate">
+                    <span className="truncate">{selectedExercise?.name}</span>
+                    <Badge
+                      variant="secondary"
+                      className="text-[10px] capitalize bg-primary/10 text-primary border-0 shrink-0"
+                    >
+                      {selectedExercise?.muscleGroup.replace("_", " ")}
+                    </Badge>
+                  </div>
+                ) : (
+                  "Search an exercise..."
+                )}
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
               </PopoverTrigger>
               <PopoverContent
                 className="w-[calc(100vw-4rem)] max-w-[576px] p-0"
@@ -397,31 +399,33 @@ export function DashboardClient({
               Select Workout Day
             </label>
             <Popover open={workoutOpen} onOpenChange={setWorkoutOpen}>
-              <PopoverTrigger asChild className={"w-full"}>
-                <Button
-                  variant="outline"
-                  role="combobox"
-                  aria-expanded={workoutOpen}
-                  className={cn(
-                    "w-full justify-between bg-secondary/50 border-border/50 h-12 text-base font-normal",
-                    !selectedWorkoutId && "text-muted-foreground",
-                  )}
-                >
-                  {selectedWorkoutId ? (
-                    <div className="flex items-center gap-2 truncate">
-                      <span className="truncate">{selectedWorkout?.name}</span>
-                      <Badge
-                        variant="secondary"
-                        className="text-[10px] bg-primary/10 text-primary border-0 shrink-0"
-                      >
-                        {selectedWorkout?.programName}
-                      </Badge>
-                    </div>
-                  ) : (
-                    "Search a workout day..."
-                  )}
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
+              <PopoverTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={workoutOpen}
+                    className={cn(
+                      "w-full justify-between bg-secondary/50 border-border/50 h-12 text-base font-normal",
+                      !selectedWorkoutId && "text-muted-foreground",
+                    )}
+                  />
+                }
+              >
+                {selectedWorkoutId ? (
+                  <div className="flex items-center gap-2 truncate">
+                    <span className="truncate">{selectedWorkout?.name}</span>
+                    <Badge
+                      variant="secondary"
+                      className="text-[10px] bg-primary/10 text-primary border-0 shrink-0"
+                    >
+                      {selectedWorkout?.programName}
+                    </Badge>
+                  </div>
+                ) : (
+                  "Search a workout day..."
+                )}
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
               </PopoverTrigger>
               <PopoverContent
                 className="w-[calc(100vw-4rem)] max-w-[576px] p-0"
