@@ -179,18 +179,27 @@ function ActiveRestTimer({
         clearInterval(interval);
         toast.success("Rest time is over! Let's get back to work 💪");
         
-        // Push Notification via Service Worker (Works on iOS PWA)
+        // Push Notification logic
         if ("Notification" in window && Notification.permission === "granted") {
-          try {
-            navigator.serviceWorker.ready.then((registration) => {
-              registration.showNotification("Rest Time is Over! 💪", {
-                body: `Time for your next set of ${exerciseName}.`,
-                icon: "/icon-192.png",
-                tag: "rest-timer",
-              });
+          const title = "Rest Time is Over! 💪";
+          const options = {
+            body: `Time for your next set of ${exerciseName}.`,
+            icon: "/icon-192.png",
+            tag: "rest-timer",
+          };
+          if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.getRegistration().then((reg) => {
+              if (reg) {
+                reg.showNotification(title, options).catch((e) => {
+                  console.error("SW Notification failed", e);
+                  new Notification(title, options);
+                });
+              } else {
+                new Notification(title, options);
+              }
             });
-          } catch (e) {
-            console.error("Push Notification failed", e);
+          } else {
+            new Notification(title, options);
           }
         }
 
@@ -471,6 +480,11 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
 
   const handleLogSet = (exerciseId: number) => {
     if (!session) return;
+    
+    if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
+      Notification.requestPermission();
+    }
+    
     const { weight, reps } = inputs[exerciseId] ?? { weight: "", reps: "" };
     const w = parseFloat(weight);
     const r = parseInt(reps, 10);
@@ -507,6 +521,10 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
   };
 
   const handleToggleSet = (setId: number, current: boolean) => {
+    if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
+      Notification.requestPermission();
+    }
+    
     startTransition(async () => {
       await toggleSetComplete(setId, !current);
       setSession((prev) =>
