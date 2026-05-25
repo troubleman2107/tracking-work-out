@@ -13,7 +13,9 @@ import {
   deleteSet,
   toggleSetComplete,
   reorderSets,
+  getPreviousExerciseStats,
 } from "@/lib/actions";
+import confetti from "canvas-confetti";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -437,6 +439,24 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
   // Session data
   const [session, setSession] = useState<ActiveSession | null>(activeSession);
 
+  // Previous stats for motivation
+  const [prevStats, setPrevStats] = useState<Record<number, { weight: number, reps: number }>>({});
+
+  useEffect(() => {
+    if (session) {
+      const exercises = session.workout?.workoutExercises.map(we => we.exerciseId) || [];
+      exercises.forEach(exId => {
+        if (!prevStats[exId]) {
+          getPreviousExerciseStats(exId, session.id).then(stat => {
+            if (stat) {
+              setPrevStats(prev => ({ ...prev, [exId]: { weight: stat.weight, reps: stat.reps } }));
+            }
+          });
+        }
+      });
+    }
+  }, [session?.id]);
+
   // Start session flow
   const [startDialogOpen, setStartDialogOpen] = useState(false);
   const [selectedProgramId, setSelectedProgramId] = useState<string>(() => {
@@ -585,6 +605,25 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
       (s) => s.exerciseId === exerciseId,
     );
     const setNumber = existingSets.length + 1;
+
+    // Check progressive overload
+    const prev = prevStats[exerciseId];
+    if (prev) {
+      const prevVolume = prev.weight * prev.reps;
+      const currentVolume = w * r;
+      if (currentVolume > prevVolume) {
+        setTimeout(() => {
+          confetti({
+            particleCount: 100,
+            spread: 70,
+            origin: { y: 0.6 },
+            colors: ["#22c55e", "#ffffff", "#facc15"]
+          });
+        }, 300);
+        // Update prev so it only cheers again if they beat the new record
+        setPrevStats(p => ({ ...p, [exerciseId]: { weight: w, reps: r } }));
+      }
+    }
 
     startTransition(async () => {
       const newSet = await logSet({
@@ -1082,6 +1121,12 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
                         Rest: {we.restTimerSets ?? 90}s ·{" "}
                         {we.restTimerExercise ?? 120}s
                       </p>
+                      {prevStats[we.exerciseId] && (
+                        <p className="text-[10px] text-green-500/90 mt-0.5 font-medium flex items-center gap-1">
+                          <Trophy className="w-3 h-3" />
+                          Last Best: {prevStats[we.exerciseId].weight}kg × {prevStats[we.exerciseId].reps}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">

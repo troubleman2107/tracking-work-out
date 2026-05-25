@@ -263,6 +263,41 @@ export async function deleteSet(id: number) {
   revalidatePath("/log");
 }
 
+export async function getPreviousExerciseStats(exerciseId: number, currentSessionId: number) {
+  const previousSets = await db.select({
+    weight: sets.weight,
+    reps: sets.reps,
+    sessionId: sets.sessionId,
+  })
+  .from(sets)
+  .where(
+    and(
+      eq(sets.exerciseId, exerciseId),
+      eq(sets.isCompleted, true)
+    )
+  )
+  .orderBy(desc(sets.loggedAt));
+  
+  const filtered = previousSets.filter(s => s.sessionId !== currentSessionId);
+  if (filtered.length === 0) return null;
+  
+  const lastSessionId = filtered[0].sessionId;
+  const setsFromLastSession = filtered.filter(s => s.sessionId === lastSessionId);
+  
+  let bestSet = setsFromLastSession[0];
+  let maxVolume = bestSet.weight * bestSet.reps;
+  
+  for (const s of setsFromLastSession) {
+    const vol = s.weight * s.reps;
+    if (vol > maxVolume) {
+      maxVolume = vol;
+      bestSet = s;
+    }
+  }
+  
+  return bestSet;
+}
+
 export async function toggleSetComplete(id: number, isCompleted: boolean) {
   const [set] = await db
     .update(sets)
