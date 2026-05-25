@@ -107,6 +107,15 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
   const [newExMuscle, setNewExMuscle] = useState<MuscleGroup>("chest");
   const [newExInstructions, setNewExInstructions] = useState("");
 
+  // Edit Exercise dialog state
+  const [editExDialogOpen, setEditExDialogOpen] = useState(false);
+  const [editingWorkoutExerciseId, setEditingWorkoutExerciseId] = useState<number | null>(null);
+  const [editTargetSets, setEditTargetSets] = useState("");
+  const [editTargetRepsMin, setEditTargetRepsMin] = useState("");
+  const [editTargetRepsMax, setEditTargetRepsMax] = useState("");
+  const [editRestTimerSets, setEditRestTimerSets] = useState("");
+  const [editRestTimerExercise, setEditRestTimerExercise] = useState("");
+
   const loadWorkoutsForProgram = (programId: number) => {
     startTransition(async () => {
       const wkts = await getWorkoutsForProgram(programId);
@@ -269,6 +278,34 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
           : null
       );
       toast.success(`${name} removed.`);
+    });
+  };
+
+  const openEditExerciseDialog = (we: NonNullable<WorkoutWithExercises>["workoutExercises"][number]) => {
+    setEditingWorkoutExerciseId(we.id);
+    setEditTargetSets(String(we.targetSets));
+    setEditTargetRepsMin(String(we.targetRepsMin));
+    setEditTargetRepsMax(String(we.targetRepsMax));
+    setEditRestTimerSets(String(we.restTimerSets ?? 90));
+    setEditRestTimerExercise(String(we.restTimerExercise ?? 120));
+    setEditExDialogOpen(true);
+  };
+
+  const handleEditExerciseSubmit = async () => {
+    if (!editingWorkoutExerciseId || !selectedWorkout) return;
+    startTransition(async () => {
+      await updateWorkoutExercise(editingWorkoutExerciseId, {
+        targetSets: Number(editTargetSets),
+        targetRepsMin: Number(editTargetRepsMin),
+        targetRepsMax: Number(editTargetRepsMax),
+        restTimerSets: Number(editRestTimerSets) || 90,
+        restTimerExercise: Number(editRestTimerExercise) || 120,
+      });
+      const updated = await getWorkoutWithExercises(selectedWorkout.id);
+      setSelectedWorkout(updated ?? null);
+      setEditingWorkoutExerciseId(null);
+      setEditExDialogOpen(false);
+      toast.success("Exercise updated!");
     });
   };
 
@@ -777,6 +814,85 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
                 </div>
               </DialogContent>
             </Dialog>
+            
+            {/* Edit Exercise Dialog */}
+            <Dialog open={editExDialogOpen} onOpenChange={setEditExDialogOpen}>
+              <DialogContent className="bg-card border-border/50 max-w-sm mx-auto">
+                <DialogHeader>
+                  <DialogTitle>Edit Exercise</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 mt-2">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <Label htmlFor="edit-target-sets">Sets</Label>
+                      <Input
+                        id="edit-target-sets"
+                        type="number"
+                        min="1"
+                        max="10"
+                        value={editTargetSets}
+                        onChange={(e) => setEditTargetSets(e.target.value)}
+                        className="mt-1.5 bg-secondary/50 border-border/50 text-center"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="edit-reps-min">Reps Min</Label>
+                      <Input
+                        id="edit-reps-min"
+                        type="number"
+                        min="1"
+                        value={editTargetRepsMin}
+                        onChange={(e) => setEditTargetRepsMin(e.target.value)}
+                        className="mt-1.5 bg-secondary/50 border-border/50 text-center"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="edit-reps-max">Reps Max</Label>
+                      <Input
+                        id="edit-reps-max"
+                        type="number"
+                        min="1"
+                        value={editTargetRepsMax}
+                        onChange={(e) => setEditTargetRepsMax(e.target.value)}
+                        className="mt-1.5 bg-secondary/50 border-border/50 text-center"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="edit-rest-sets" className="text-xs">Rest Between Sets (s)</Label>
+                      <Input
+                        id="edit-rest-sets"
+                        type="number"
+                        min="0"
+                        value={editRestTimerSets}
+                        onChange={(e) => setEditRestTimerSets(e.target.value)}
+                        className="mt-1.5 bg-secondary/50 border-border/50 text-center"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="edit-rest-ex" className="text-xs">Rest After Exercise (s)</Label>
+                      <Input
+                        id="edit-rest-ex"
+                        type="number"
+                        min="0"
+                        value={editRestTimerExercise}
+                        onChange={(e) => setEditRestTimerExercise(e.target.value)}
+                        className="mt-1.5 bg-secondary/50 border-border/50 text-center"
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    id="btn-edit-exercise-confirm"
+                    onClick={handleEditExerciseSubmit}
+                    disabled={isPending}
+                    className="w-full bg-primary text-primary-foreground"
+                  >
+                    {isPending ? "Saving..." : "Save Changes"}
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
 
           {selectedWorkout.workoutExercises.length === 0 ? (
@@ -820,16 +936,26 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
                           Rest: {we.restTimerSets ?? 90}s between sets · {we.restTimerExercise ?? 120}s after
                         </p>
                       </div>
-                      <button
-                        id={`btn-remove-ex-${we.id}`}
-                        onClick={() =>
-                          handleRemoveExercise(we.id, we.exercise.name)
-                        }
-                        className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors mt-0.5"
-                        aria-label={`Remove ${we.exercise.name}`}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex flex-col items-center gap-1">
+                        <button
+                          id={`btn-edit-ex-${we.id}`}
+                          onClick={() => openEditExerciseDialog(we)}
+                          className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                          aria-label={`Edit ${we.exercise.name}`}
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                        <button
+                          id={`btn-remove-ex-${we.id}`}
+                          onClick={() =>
+                            handleRemoveExercise(we.id, we.exercise.name)
+                          }
+                          className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                          aria-label={`Remove ${we.exercise.name}`}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
