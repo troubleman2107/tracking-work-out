@@ -123,11 +123,21 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
   }, []);
 
   const handleSelectProgram = (program: Program) => {
-    setSelectedProgramId(program.id);
-    loadWorkoutsForProgram(program.id);
+    if (selectedProgramId === program.id) {
+      setSelectedProgramId(null);
+      setWorkouts([]);
+      setSelectedWorkout(null);
+    } else {
+      setSelectedProgramId(program.id);
+      loadWorkoutsForProgram(program.id);
+    }
   };
 
   const handleSelectWorkout = (workoutId: number) => {
+    if (selectedWorkout?.id === workoutId) {
+      setSelectedWorkout(null);
+      return;
+    }
     startTransition(async () => {
       const wkt = await getWorkoutWithExercises(workoutId);
       setSelectedWorkout(wkt ?? null);
