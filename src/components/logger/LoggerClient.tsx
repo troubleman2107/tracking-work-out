@@ -427,6 +427,13 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
+  // Delete confirmation state
+  const [deleteDialog, setDeleteDialog] = useState<{
+    isOpen: boolean;
+    type: "set" | "session";
+    setId?: number;
+  }>({ isOpen: false, type: "set" });
+
   // Session data
   const [session, setSession] = useState<ActiveSession | null>(activeSession);
 
@@ -641,6 +648,10 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
   };
 
   const handleDeleteSet = (setId: number) => {
+    setDeleteDialog({ isOpen: true, type: "set", setId });
+  };
+
+  const confirmDeleteSet = (setId: number) => {
     startTransition(async () => {
       await deleteSet(setId);
       setSession((prev) =>
@@ -648,6 +659,7 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
           ? { ...prev, sets: prev.sets.filter((s) => s.id !== setId) }
           : prev,
       );
+      setDeleteDialog({ isOpen: false, type: "set" });
     });
   };
 
@@ -732,11 +744,16 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
   };
 
   const handleCancelSession = () => {
+    setDeleteDialog({ isOpen: true, type: "session" });
+  };
+
+  const confirmCancelSession = () => {
     if (!session) return;
     startTransition(async () => {
       await cancelSession(session.id);
       setSession(null);
       toast("Session cancelled.");
+      setDeleteDialog({ isOpen: false, type: "session" });
       router.refresh();
     });
   };
@@ -1251,6 +1268,36 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
             >
               Keep Going
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialog.isOpen} onOpenChange={(open) => setDeleteDialog(prev => ({ ...prev, isOpen: open }))}>
+        <DialogContent className="bg-card border-border/50 max-w-sm mx-auto">
+          <DialogHeader>
+            <DialogTitle>Confirm {deleteDialog.type === "set" ? "Deletion" : "Cancellation"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <p className="text-sm text-muted-foreground">
+              {deleteDialog.type === "set" 
+                ? "Are you sure you want to delete this set? This action cannot be undone." 
+                : "Are you sure you want to cancel this session? Your progress will be skipped."}
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDeleteDialog(prev => ({ ...prev, isOpen: false }))}>
+                Go Back
+              </Button>
+              <Button variant="destructive" onClick={() => {
+                if (deleteDialog.type === "set" && deleteDialog.setId) {
+                  confirmDeleteSet(deleteDialog.setId);
+                } else if (deleteDialog.type === "session") {
+                  confirmCancelSession();
+                }
+              }}>
+                {deleteDialog.type === "set" ? "Delete Set" : "Cancel Session"}
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

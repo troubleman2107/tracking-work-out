@@ -116,6 +116,14 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
   const [editRestTimerSets, setEditRestTimerSets] = useState("");
   const [editRestTimerExercise, setEditRestTimerExercise] = useState("");
 
+  // Delete confirmation state
+  const [deleteDialog, setDeleteDialog] = useState<{
+    isOpen: boolean;
+    type: "program" | "workout" | "exercise";
+    id: number;
+    name: string;
+  }>({ isOpen: false, type: "program", id: 0, name: "" });
+
   const loadWorkoutsForProgram = (programId: number) => {
     startTransition(async () => {
       const wkts = await getWorkoutsForProgram(programId);
@@ -426,7 +434,7 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
                     id={`btn-delete-program-${program.id}`}
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleDeleteProgram(program.id, program.name);
+                      setDeleteDialog({ isOpen: true, type: "program", id: program.id, name: program.name });
                     }}
                     className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                     aria-label={`Delete ${program.name}`}
@@ -528,7 +536,7 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
                     id={`btn-delete-workout-${workout.id}`}
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleDeleteWorkout(workout.id, workout.name);
+                      setDeleteDialog({ isOpen: true, type: "workout", id: workout.id, name: workout.name });
                     }}
                     className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                     aria-label={`Delete ${workout.name}`}
@@ -947,9 +955,7 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
                         </button>
                         <button
                           id={`btn-remove-ex-${we.id}`}
-                          onClick={() =>
-                            handleRemoveExercise(we.id, we.exercise.name)
-                          }
+                          onClick={() => setDeleteDialog({ isOpen: true, type: "exercise", id: we.id, name: we.exercise.name })}
                           className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                           aria-label={`Remove ${we.exercise.name}`}
                         >
@@ -967,6 +973,39 @@ export function PlannerClient({ initialPrograms }: PlannerClientProps) {
         })()}
         </>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialog.isOpen} onOpenChange={(open) => setDeleteDialog(prev => ({ ...prev, isOpen: open }))}>
+        <DialogContent className="bg-card border-border/50 max-w-sm mx-auto">
+          <DialogHeader>
+            <DialogTitle>Confirm Deletion</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <p className="text-sm text-muted-foreground">
+              Are you sure you want to delete {deleteDialog.type === "program" ? "this program" : deleteDialog.type === "workout" ? "this workout" : "this exercise"}? This action cannot be undone.
+              <br/><br/>
+              <strong>{deleteDialog.name}</strong>
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDeleteDialog(prev => ({ ...prev, isOpen: false }))}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={() => {
+                if (deleteDialog.type === "program") {
+                  handleDeleteProgram(deleteDialog.id, deleteDialog.name);
+                } else if (deleteDialog.type === "workout") {
+                  handleDeleteWorkout(deleteDialog.id, deleteDialog.name);
+                } else {
+                  handleRemoveExercise(deleteDialog.id, deleteDialog.name);
+                }
+                setDeleteDialog(prev => ({ ...prev, isOpen: false }));
+              }}>
+                Delete
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
