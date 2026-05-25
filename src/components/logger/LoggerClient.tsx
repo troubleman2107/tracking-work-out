@@ -647,6 +647,14 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
         existingSets.filter((s) => s.isCompleted).length + 1;
       startRestTimer(exerciseId, completedCount);
       toast.success(`Set ${setNumber} logged ✓`, { duration: 1500 });
+
+      // Scroll inputs back into view so user can log next set without scrolling
+      setTimeout(() => {
+        const inputEl = document.getElementById(`weight-input-${exerciseId}`);
+        if (inputEl) {
+          inputEl.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }, 150);
     });
   };
 
