@@ -51,6 +51,19 @@ export async function getWorkoutsForProgram(programId: number) {
     .orderBy(asc(workouts.orderIndex));
 }
 
+export async function getAllWorkouts() {
+  return db
+    .select({
+      id: workouts.id,
+      name: workouts.name,
+      programId: workouts.programId,
+      programName: programs.name,
+    })
+    .from(workouts)
+    .innerJoin(programs, eq(workouts.programId, programs.id))
+    .orderBy(asc(programs.name), asc(workouts.orderIndex));
+}
+
 export async function getWorkoutWithExercises(workoutId: number) {
   const workout = await db.query.workouts.findFirst({
     where: eq(workouts.id, workoutId),
@@ -367,6 +380,131 @@ export async function getProgressDataForExercise(exerciseId: number) {
       date: date.toISOString().split("T")[0],
       totalVolume: Math.round(totalVolume),
       estimated1RM: Math.round(best1RM * 10) / 10,
+    };
+  });
+}
+
+export async function getOverallSessionData() {
+  const rows = await db
+    .select({
+      sessionId: sessions.id,
+      sessionDate: sessions.startedAt,
+      sessionName: sessions.name,
+      weight: sets.weight,
+      reps: sets.reps,
+      exerciseId: sets.exerciseId,
+    })
+    .from(sessions)
+    .leftJoin(sets, and(eq(sets.sessionId, sessions.id), eq(sets.isCompleted, true)))
+    .where(eq(sessions.status, "completed"))
+    .orderBy(asc(sessions.startedAt));
+
+  const sessionMap = new Map<
+    number,
+    { date: Date; name: string; sets: { weight: number; reps: number; exerciseId: number }[] }
+  >();
+
+  for (const row of rows) {
+    if (!sessionMap.has(row.sessionId)) {
+      sessionMap.set(row.sessionId, { date: row.sessionDate, name: row.sessionName, sets: [] });
+    }
+    if (row.weight != null && row.reps != null && row.exerciseId != null) {
+      sessionMap.get(row.sessionId)!.sets.push({ weight: row.weight, reps: row.reps, exerciseId: row.exerciseId });
+    }
+  }
+
+  return Array.from(sessionMap.entries()).map(([sessionId, { date, name, sets: sessionSets }]) => {
+    const totalVolume = sessionSets.reduce((acc, s) => acc + s.weight * s.reps, 0);
+    
+    const ex1RMMap = new Map<number, number>();
+    for (const s of sessionSets) {
+      const rm = s.reps === 1 ? s.weight : s.weight / (1.0278 - 0.0278 * s.reps);
+      const currentRM = ex1RMMap.get(s.exerciseId) || 0;
+      if (rm > currentRM) {
+        ex1RMMap.set(s.exerciseId, rm);
+      }
+    }
+    const total1RM = Array.from(ex1RMMap.values()).reduce((acc, rm) => acc + rm, 0);
+
+    return {
+      sessionId,
+      name,
+      date: date.toISOString().split("T")[0],
+      totalVolume: Math.round(totalVolume),
+      estimated1RM: Math.round(total1RM * 10) / 10,
+      totalSets: sessionSets.length,
+    };
+  });
+}
+
+export async function getProgressDataForWorkoutId(workoutId: number) {
+  const rows = await db
+    .select({
+      sessionId: sessions.id,
+      sessionDate: sessions.startedAt,
+      weight: sets.weight,
+      reps: sets.reps,
+      exerciseId: exercises.id,
+      exerciseName: exercises.name,
+    })
+    .from(sessions)
+    .leftJoin(sets, and(eq(sets.sessionId, sessions.id), eq(sets.isCompleted, true)))
+    .leftJoin(exercises, eq(sets.exerciseId, exercises.id))
+    .where(
+      and(
+        eq(sessions.workoutId, workoutId),
+        eq(sessions.status, "completed")
+      )
+    )
+    .orderBy(asc(sessions.startedAt));
+
+  const sessionMap = new Map<
+    number,
+    { date: Date; sets: { weight: number; reps: number; exerciseId: number | null; exerciseName: string | null }[] }
+  >();
+
+  for (const row of rows) {
+    if (!sessionMap.has(row.sessionId)) {
+      sessionMap.set(row.sessionId, { date: row.sessionDate, sets: [] });
+    }
+    if (row.weight != null && row.reps != null && row.exerciseId != null) {
+      sessionMap.get(row.sessionId)!.sets.push({ 
+        weight: row.weight, 
+        reps: row.reps,
+        exerciseId: row.exerciseId,
+        exerciseName: row.exerciseName
+      });
+    }
+  }
+
+  return Array.from(sessionMap.entries()).map(([sessionId, { date, sets: sessionSets }]) => {
+    const totalVolume = sessionSets.reduce((acc, s) => acc + s.weight * s.reps, 0);
+    
+    const exerciseVolumeMap = new Map<number, { name: string, volume: number }>();
+    const ex1RMMap = new Map<number, number>();
+    
+    for (const s of sessionSets) {
+      if (s.exerciseId && s.exerciseName) {
+        const current = exerciseVolumeMap.get(s.exerciseId) || { name: s.exerciseName, volume: 0 };
+        current.volume += (s.weight * s.reps);
+        exerciseVolumeMap.set(s.exerciseId, current);
+        
+        const rm = s.reps === 1 ? s.weight : s.weight / (1.0278 - 0.0278 * s.reps);
+        const currentRM = ex1RMMap.get(s.exerciseId) || 0;
+        if (rm > currentRM) {
+          ex1RMMap.set(s.exerciseId, rm);
+        }
+      }
+    }
+    
+    const total1RM = Array.from(ex1RMMap.values()).reduce((acc, rm) => acc + rm, 0);
+    
+    return {
+      sessionId,
+      date: date.toISOString().split("T")[0],
+      totalVolume: Math.round(totalVolume),
+      estimated1RM: Math.round(total1RM * 10) / 10,
+      exerciseVolumes: Array.from(exerciseVolumeMap.values()),
     };
   });
 }

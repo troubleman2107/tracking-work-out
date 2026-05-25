@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getAllExercises } from "@/lib/actions";
+import { getAllExercises, getOverallSessionData, getAllWorkouts } from "@/lib/actions";
 import { DashboardClient } from "@/components/dashboard/DashboardClient";
 
 export const metadata: Metadata = {
@@ -11,6 +11,8 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const exercises = await getAllExercises();
+  const overallSessions = await getOverallSessionData();
+  const workouts = await getAllWorkouts();
 
   return (
     <div className="min-h-screen px-4 pt-6 pb-8 max-w-2xl mx-auto">
@@ -25,7 +27,7 @@ export default async function DashboardPage() {
         </p>
       </header>
 
-      <DashboardClient exercises={exercises} />
+      <DashboardClient exercises={exercises} overallSessions={overallSessions} workouts={workouts} />
     </div>
   );
 }
