@@ -178,11 +178,27 @@ function ActiveRestTimer({
       if (remaining <= 0) {
         clearInterval(interval);
         toast.success("Rest time is over! Let's get back to work 💪");
+        
+        // Push Notification via Service Worker (Works on iOS PWA)
+        if ("Notification" in window && Notification.permission === "granted") {
+          try {
+            navigator.serviceWorker.ready.then((registration) => {
+              registration.showNotification("Rest Time is Over! 💪", {
+                body: `Time for your next set of ${exerciseName}.`,
+                icon: "/icon-192.png",
+                tag: "rest-timer",
+              });
+            });
+          } catch (e) {
+            console.error("Push Notification failed", e);
+          }
+        }
+
         onClose();
       }
     }, 1000);
     return () => clearInterval(interval);
-  }, [endTime, onClose]);
+  }, [endTime, onClose, exerciseName]);
 
   const m = Math.floor(left / 60);
   const s = left % 60;
@@ -414,6 +430,12 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
 
   const handleStartSession = () => {
     if (!selectedWorkoutId) return;
+
+    // Request notification permissions for the Rest Timer
+    if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
+      Notification.requestPermission();
+    }
+
     startTransition(async () => {
       const wkt = workouts.find((w) => w.id === Number(selectedWorkoutId));
       const sessionName = wkt?.name ?? "Workout";
