@@ -198,7 +198,7 @@ export async function startSession(
   workoutId: number,
   name: string,
   startedAt?: Date
-): Promise<{ id: number }> {
+): Promise<{ id: number; sets: any[] }> {
   const [session] = await db
     .insert(sessions)
     .values({
@@ -208,8 +208,33 @@ export async function startSession(
       ...(startedAt ? { startedAt } : {}),
     })
     .returning({ id: sessions.id });
+
+  const previousSession = await db.query.sessions.findFirst({
+    where: and(
+      eq(sessions.workoutId, workoutId),
+      eq(sessions.status, "completed")
+    ),
+    orderBy: desc(sessions.startedAt),
+    with: {
+      sets: true
+    }
+  });
+
+  let newSetsList: any[] = [];
+  if (previousSession && previousSession.sets.length > 0) {
+    const setsToInsert = previousSession.sets.map(s => ({
+      sessionId: session.id,
+      exerciseId: s.exerciseId,
+      setNumber: s.setNumber,
+      weight: s.weight,
+      reps: s.reps,
+      isCompleted: false,
+    }));
+    newSetsList = await db.insert(sets).values(setsToInsert).returning();
+  }
+
   revalidatePath("/log");
-  return session;
+  return { id: session.id, sets: newSetsList };
 }
 
 export async function completeSession(sessionId: number) {
@@ -297,6 +322,8 @@ export async function getPreviousExerciseStats(exerciseId: number, currentSessio
   const lastSessionId = filtered[0].sessionId;
   const setsFromLastSession = filtered.filter(s => s.sessionId === lastSessionId);
   
+  const totalVolume = setsFromLastSession.reduce((acc, s) => acc + (s.weight * s.reps), 0);
+  
   let bestSet = setsFromLastSession[0];
   let maxVolume = bestSet.weight * bestSet.reps;
   
@@ -308,7 +335,10 @@ export async function getPreviousExerciseStats(exerciseId: number, currentSessio
     }
   }
   
-  return bestSet;
+  return {
+    ...bestSet,
+    totalVolume
+  };
 }
 
 export async function toggleSetComplete(id: number, isCompleted: boolean) {

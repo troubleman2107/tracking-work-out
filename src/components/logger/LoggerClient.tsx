@@ -440,7 +440,7 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
   const [session, setSession] = useState<ActiveSession | null>(activeSession);
 
   // Previous stats for motivation
-  const [prevStats, setPrevStats] = useState<Record<number, { weight: number, reps: number }>>({});
+  const [prevStats, setPrevStats] = useState<Record<number, { weight: number, reps: number, totalVolume?: number }>>({});
 
   useEffect(() => {
     if (session) {
@@ -449,7 +449,13 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
         if (!prevStats[exId]) {
           getPreviousExerciseStats(exId, session.id).then(stat => {
             if (stat) {
-              setPrevStats(prev => ({ ...prev, [exId]: { weight: stat.weight, reps: stat.reps } }));
+              setPrevStats(prev => ({ ...prev, [exId]: { weight: stat.weight, reps: stat.reps, totalVolume: stat.totalVolume } }));
+              setInputs(prev => {
+                if (!prev[exId] || (prev[exId].weight === "" && prev[exId].reps === "")) {
+                  return { ...prev, [exId]: { weight: String(stat.weight), reps: String(stat.reps) } };
+                }
+                return prev;
+              });
             }
           });
         }
@@ -567,7 +573,7 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
         status: "in_progress",
         startedAt,
         workoutId: Number(selectedWorkoutId),
-        sets: [],
+        sets: newSession.sets || [],
         workout: fullWorkout
           ? {
               id: fullWorkout.id,
@@ -593,8 +599,21 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
     }
 
     const { weight, reps } = inputs[exerciseId] ?? { weight: "", reps: "" };
-    const w = parseFloat(weight);
-    const r = parseInt(reps, 10);
+    let w = parseFloat(weight);
+    let r = parseInt(reps, 10);
+    
+    const we = session.workout?.workoutExercises.find(we => we.exerciseId === exerciseId);
+    const prev = prevStats[exerciseId];
+    
+    if (isNaN(w)) {
+      if (prev) w = prev.weight;
+      else if (we?.targetWeight) w = we.targetWeight;
+    }
+    if (isNaN(r)) {
+      if (prev) r = prev.reps;
+      else if (we?.targetRepsMin) r = we.targetRepsMin;
+    }
+
     if (isNaN(w) || isNaN(r) || w <= 0 || r <= 0) {
       toast.error("Enter valid weight and reps.");
       return;
@@ -607,7 +626,6 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
     const setNumber = existingSets.length + 1;
 
     // Check progressive overload
-    const prev = prevStats[exerciseId];
     if (prev) {
       const prevVolume = prev.weight * prev.reps;
       const currentVolume = w * r;
@@ -1132,7 +1150,8 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
                       {prevStats[we.exerciseId] && (
                         <p className="text-[10px] text-green-500/90 mt-0.5 font-medium flex items-center gap-1">
                           <Trophy className="w-3 h-3" />
-                          Last Best: {prevStats[we.exerciseId].weight}kg × {prevStats[we.exerciseId].reps}
+                          Last: {prevStats[we.exerciseId].weight}kg × {prevStats[we.exerciseId].reps}
+                          {prevStats[we.exerciseId].totalVolume !== undefined && ` · Vol: ${prevStats[we.exerciseId].totalVolume}kg`}
                         </p>
                       )}
                     </div>
@@ -1207,7 +1226,9 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
                       type="number"
                       inputMode="decimal"
                       placeholder={
-                        we.targetWeight ? String(we.targetWeight) : "kg"
+                        prevStats[we.exerciseId]?.weight 
+                          ? String(prevStats[we.exerciseId].weight)
+                          : we.targetWeight ? String(we.targetWeight) : "kg"
                       }
                       value={input.weight}
                       onChange={(e) =>
@@ -1231,7 +1252,9 @@ export function LoggerClient({ activeSession, programs }: LoggerClientProps) {
                       type="number"
                       inputMode="numeric"
                       placeholder={
-                        we.targetRepsMin ? String(we.targetRepsMin) : "reps"
+                        prevStats[we.exerciseId]?.reps
+                          ? String(prevStats[we.exerciseId].reps)
+                          : we.targetRepsMin ? String(we.targetRepsMin) : "reps"
                       }
                       value={input.reps}
                       onChange={(e) =>
